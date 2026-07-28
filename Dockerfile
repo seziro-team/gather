@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── build ────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 RUN corepack enable
 WORKDIR /app
 
@@ -20,7 +20,7 @@ RUN pnpm --filter @gather/core build \
   && pnpm --filter @gather/web build
 
 # ── runtime ──────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
