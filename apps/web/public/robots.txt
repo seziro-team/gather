@@ -1,0 +1,4 @@
+# A Gather install is a private document portal for one firm and its clients.
+# Nothing here should ever appear in a search index.
+User-agent: *
+Disallow: /
