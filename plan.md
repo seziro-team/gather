@@ -1,6 +1,6 @@
 # Gather — Build Plan
 
-**Status:** Phase 0 output. Awaiting operator approval.
+**Status:** Phase 1 shipped (v0.1.0 foundation). Phase 2 is next.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -252,7 +252,7 @@ flowchart TB
         K["Worker — pg-boss<br/>reminders · scans · zips"]
     end
     subgraph data["State"]
-        PG[("PostgreSQL 16<br/>only required service")]
+        PG[("PostgreSQL 18<br/>only required service")]
         ST["Storage driver<br/>local disk | S3-compatible"]
     end
     subgraph ext["External (all env-driven, all optional)"]
@@ -279,8 +279,8 @@ we don't have is a self-hoster we don't lose.
 | Layer | Choice | Reason |
 |---|---|---|
 | Language | **TypeScript** end to end | Protocol §7 allows TS or Python. One language for the portal, dashboard, API and worker means one build, one test runner, one Docker image. The client portal is the product's riskiest surface (mobile, autosave, drag-drop) and demands a first-class front end. |
-| Framework | **Next.js 15** (App Router) | Portal + dashboard + API in one deployable. Server Components keep the client bundle small on bad phone connections. |
-| DB | **PostgreSQL 16** | JSONB for item configs/responses, strong constraints for the state machine, and it doubles as the job queue. |
+| Framework | **Next.js 16** (App Router) | Portal + dashboard + API in one deployable. Server Components keep the client bundle small on bad phone connections. *(P1: built on 16.2.12 — 15 was the current release when this plan was written. Turbopack is now the default builder; `middleware.ts` is renamed `proxy.ts`; `next lint` is gone in favour of the ESLint CLI.)* |
+| DB | **PostgreSQL 18** | JSONB for item configs/responses, strong constraints for the state machine, and it doubles as the job queue. *(P1: 18 is the current major; there is no reason to start a new project on 16. Note its image wants a single mount at `/var/lib/postgresql`, not `/var/lib/postgresql/data`.)* |
 | ORM | **Drizzle** | No engine binary, plain SQL migrations — matters for `docker compose up` reliability and for auditability of a security-sensitive schema. |
 | Queue | **pg-boss** | See above. |
 | Auth (firm) | **Better Auth** ([MIT, 29.4k★](https://github.com/better-auth/better-auth)) + [`twoFactor()` TOTP plugin](https://www.better-auth.com/docs/plugins/2fa) | Self-hostable, Drizzle schema generation, and TOTP satisfies the MFA requirement in 16 CFR 314.4(c)(5). |
@@ -290,6 +290,7 @@ we don't have is a self-hoster we don't lose.
 | AV | **ClamAV** container, opt-in | See 4.3. |
 | Site | **Astro** | Protocol §6. Static output, deploy anywhere. |
 | Tests | **Vitest** + **Playwright** | Playwright is non-negotiable: the portal must be proven on a mobile viewport. |
+| Toolchain | **TypeScript 5.9**, ESLint 10 flat config, Prettier | *(P1: TypeScript 7 is the current release, but `typescript-eslint` declares `typescript <6.1.0`; taking 7 would mean dropping type-aware linting on a security-sensitive codebase. Revisit when typescript-eslint supports it.)* |
 
 ### 4.2 Storage — and a correction to the brief
 
@@ -354,7 +355,7 @@ item(id, section_id, type: file|text|longtext|yesno|date|choice|number,
      label, help_text, required, position, config jsonb)
 response(id, item_id, value jsonb, status: pending|submitted|approved|rejected,
          reject_note, submitted_at, reviewed_at, reviewed_by, version)
-file(id, response_id, storage_key, original_name, mime, size, sha256,
+file(id, response_id, response_version, storage_key, original_name, mime, size, sha256,
      scan_status: pending|clean|infected|skipped, encrypted, dek_wrapped, iv, tag,
      uploaded_at, uploaded_ip)
 access_token(id, request_id, token_hash, purpose, expires_at, revoked_at, last_used_at)
@@ -363,7 +364,20 @@ reminder_schedule(id, request_id, cadence jsonb, active, next_run_at, sent_count
 reminder_log(id, request_id, schedule_id, channel, provider_message_id, status, error, sent_at)
 audit_event(id, firm_id, request_id, actor_type, actor_id, action, target_type, target_id,
             metadata jsonb, ip, ua, created_at, prev_hash, hash)   -- append-only, hash-chained
+audit_head(id=1, last_id, last_hash, updated_at)                   -- makes truncation detectable
 ```
+
+**Three refinements from building it (P1):**
+
+- `file.response_version` records which version of a response an upload belonged to, so a
+  file superseded by a resubmission is retained and still attributable (P5 acceptance ②).
+- `audit_head` is a new single-row table. Without it, deleting the *newest* audit events
+  leaves a chain that still verifies perfectly — truncation would be invisible.
+- **`audit_event` carries no foreign keys, by design.** `ON DELETE SET NULL` would rewrite
+  audit rows when a request is deleted, silently breaking the chain; `CASCADE` would erase
+  the evidence; `RESTRICT` would make deletion impossible forever. `audit_event.id` is the
+  chain position itself — contiguous from 1, assigned under a Postgres advisory lock — so a
+  gap is evidence rather than an artefact of a sequence.
 
 `request.status`: `draft → sent → in_progress → submitted → complete` (+ `archived`).
 `response.status` is what actually drives completion: a request is `complete` only when every
@@ -565,15 +579,32 @@ drifted, conventional commits, and the one-line resume instruction printed.
 
 ---
 
-### Phase 1 — Foundation, schema, auth, CI
+### Phase 1 — Foundation, schema, auth, CI ✅ **shipped**
 **Goal:** a clean clone boots to a working, empty, secured app in under 5 minutes.
 
-Tasks: pnpm monorepo (`apps/web`, `apps/worker`, `packages/{db,core,storage,mail}`, `site/`);
-Next.js 15 + Tailwind; Drizzle schema for §4.4 + migrations; Better Auth + `twoFactor()`;
-hash-chained audit helper + verifier; health endpoints; multi-stage Dockerfile;
-`docker-compose.yml`; `.env.example` (every var commented + where to obtain it);
-GitHub Actions (typecheck, lint, test, build); `LICENSE` (AGPL-3.0), `README`, `CONTRIBUTING.md`,
-issue templates, `SECURITY.md` stub.
+Tasks: pnpm monorepo (`apps/web`, `packages/{core,db}`); Next.js 16 + Tailwind 4; Drizzle
+schema for §4.4 + migrations; Better Auth + `twoFactor()`; hash-chained audit helper +
+verifier; health endpoint; multi-stage Dockerfile; `docker-compose.yml`; `.env.example`
+(every var commented + where to obtain it); GitHub Actions (build, typecheck, lint, format,
+test, `pnpm audit`, e2e against the built image); `LICENSE` (AGPL-3.0), `README`,
+`CONTRIBUTING.md`, issue templates, `SECURITY.md`.
+
+> **Deviation (P1).** `apps/worker`, `packages/storage` and `packages/mail` are *not*
+> created here. They have no real implementation until P4, P3 and P4 respectively, and an
+> empty package that exports nothing is precisely the kind of scaffolding the Realness Rule
+> (§4) exists to prevent. Each is created in the phase that fills it.
+>
+> **Deviation (P1).** Migrations run in-process from Next's `instrumentation.register()`
+> hook rather than from a separate container command. The standalone build bundles the
+> workspace packages, so a `node packages/db/dist/cli/migrate.js` inside the image would
+> have no `node_modules` to resolve against. Running in-process also guarantees the server
+> never answers a request against a schema it has not finished migrating. `GATHER_AUTO_MIGRATE=false`
+> opts out for teams that run migrations separately; the CLI still works from a source checkout.
+>
+> **Deviation (P1).** `.env.example` ships `GATHER_AUTH_SECRET=` *empty*, and the container
+> generates a strong secret on first boot into the `gather-data` volume. Shipping a working
+> secret in a public example file would give every install a forgeable one; requiring the
+> operator to generate one would break the one-command quickstart. This does both.
 
 **Acceptance:** ① clean clone → `cp .env.example .env && docker compose up -d` → healthy at
 `localhost:3000` in <5 min, timed. ② Owner signs up, enables TOTP, logs out, logs back in with a
@@ -585,11 +616,22 @@ code from a real authenticator app. ③ `audit_event` chain verifies; tampering 
 git clone <repo> gather-demo && cd gather-demo
 cp .env.example .env && time docker compose up -d --build
 curl -fsS localhost:3000/api/health            # {"status":"ok","db":"ok","migrations":"applied"}
-# browser: sign up → Settings → Enable 2FA → scan QR → log out → log in with TOTP
-docker compose exec -T db psql -U gather -c "select action,left(hash,12) from audit_event order by id;"
-pnpm verify:audit                              # OK: 7 events, chain intact
+# browser: sign up → Security → Set up authenticator app → scan QR → sign out → sign in with TOTP
+# or, headless, with GNU oathtool standing in for the phone:
+GATHER_E2E_URL=http://127.0.0.1:3000 pnpm exec playwright test --grep "owner signs up"
+
+docker compose exec -T db psql -U gather -c "select id,action,left(hash,12) from audit_event order by id;"
+DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
+                                               # OK: 8 events, chain intact
+
+# Layer 1 — the database refuses outright:
 docker compose exec -T db psql -U gather -c "update audit_event set action='x' where id=2;"
-pnpm verify:audit                              # FAIL at id=2  ← proves tamper-evidence
+                                               # ERROR: audit_event is append-only
+# Layer 2 — disable the trigger, as someone with DB rights would, and edit anyway:
+docker compose exec -T db psql -U gather \
+  -c "alter table audit_event disable trigger audit_event_append_only;" \
+  -c "update audit_event set action='x' where id=2;"
+DATABASE_URL=... pnpm verify:audit             # FAIL at id=2  ← proves tamper-evidence
 ```
 
 ---
@@ -811,4 +853,5 @@ timed under 5 minutes by someone following only the README. ⑤ `v0.1.0` tagged 
 Each phase is designed to start from a cleared context. Read `CLAUDE.md`, then this file, then
 `progress.md`, then `git log --oneline -20`.
 
-- **Phase 1:** `Start Phase 1: Foundation, schema, auth, CI — per plan.md §9.`
+- ~~**Phase 1:** `Start Phase 1: Foundation, schema, auth, CI — per plan.md §9.`~~ — shipped.
+- **Phase 2:** `Start Phase 2: Request builder + real templates — per plan.md §9.`
