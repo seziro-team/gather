@@ -33,6 +33,7 @@ export async function register(): Promise<void> {
 
   const { createDatabase, createPool, getMigrationStatus } = await import('@gather/db');
   const { runMigrations } = await import('@gather/db/migrator');
+  const { seedBuiltinTemplates } = await import('@gather/db/seed');
 
   const pool = createPool(url, { max: 2 });
   try {
@@ -50,6 +51,15 @@ export async function register(): Promise<void> {
       }
       log.info('migrations applied', { applied: after.applied });
     }
+
+    // A fresh install with an empty template list would fail the self-host promise before
+    // the operator had done anything wrong. Idempotent, and locked against replicas.
+    const seeded = await seedBuiltinTemplates(database);
+    log.info('built-in templates ready', {
+      installed: seeded.installed.length,
+      updated: seeded.updated.length,
+      unchanged: seeded.unchanged.length,
+    });
   } catch (error) {
     log.error('could not prepare the database', { error: (error as Error).message });
     process.exit(1);

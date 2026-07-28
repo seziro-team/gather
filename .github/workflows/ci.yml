@@ -58,6 +58,12 @@ jobs:
       - name: Check formatting
         run: pnpm format
 
+      # templates/SOURCES.md is generated from packages/core/src/templates/. An item added
+      # without a citation, or a checklist changed without regenerating the document, fails
+      # here rather than shipping a source list that no longer describes what we send.
+      - name: Check template sources are documented
+        run: pnpm docs:sources:check
+
       - name: Test
         run: pnpm test
         env:

@@ -1,6 +1,7 @@
 # Gather — Build Plan
 
-**Status:** Phase 1 shipped (v0.1.0 foundation). Phase 2 is next.
+**Status:** Phases 1 and 2 shipped (foundation; request builder and built-in templates).
+Phase 3 is next.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -494,11 +495,14 @@ Plus, specific to this threat model:
 ### 7.1 FREE — self-hosted (the real product)
 
 - **Request builder** — sections + items: `file`, `text`, `longtext`, `yes/no`, `date`, `choice`,
-  `number`. Required/optional, help text, drag-reorder.
+  `number`. Required/optional, help text, drag-reorder. *(P2: shipped — 4 sections/25 items in the
+  largest built-in; drag works with mouse, touch and arrow keys.)*
 - **Templates** — save any request as a template; **4 real built-ins ship**: US individual tax
   year-end, business onboarding, mortgage application, bookkeeping monthly close. *Every item in
   every built-in must be traceable to a real-world source (IRS 1040 instructions/Pub 17, lender
   checklists); sources recorded in `templates/SOURCES.md`. No invented checklists.*
+  *(P2: shipped — 74 items across the four, every one citing a page that returned HTTP 200 on
+  2026-07-28. `templates/SOURCES.md` is generated from the definitions and checked in CI.)*
 - **Client portal** — branded (logo + colour), magic link, **no account**, checklist UI, autosave,
   drag-drop uploads, camera-roll friendly, mobile-first.
 - **Reminders** — configurable schedules (fixed interval / escalating / custom days + time,
@@ -636,12 +640,40 @@ DATABASE_URL=... pnpm verify:audit             # FAIL at id=2  ← proves tamper
 
 ---
 
-### Phase 2 — Request builder + real templates
+### Phase 2 — Request builder + real templates ✅ **shipped**
 **Goal:** a firm can build any request, and four genuinely useful ones already exist.
 
 Tasks: builder UI (sections, drag-reorder, all 7 item types, required flags, help text); live
 preview; template CRUD + "save as template"; seed the 4 built-ins with **sourced** items and
 `templates/SOURCES.md`; client CRUD.
+
+> **Deviation (P2).** `templates/SOURCES.md` is **generated** from
+> `packages/core/src/templates/` by `pnpm docs:sources`, and `pnpm docs:sources:check` runs
+> in CI. Hand-writing it would let the document and the shipped checklists drift, which is
+> the one failure that would make the "nothing was invented" claim worthless. The citation
+> lives on the item, in code, and the document is derived from it.
+>
+> **Deviation (P2).** Built-in templates are installed **at boot**, from
+> `instrumentation.register()`, not by a manual `pnpm seed:templates`. A fresh
+> `docker compose up` that offered an empty template list would fail §5's self-host promise
+> before the operator had done anything wrong. The CLI still exists for source checkouts.
+>
+> **Deviation (P2).** Citations are carried on the **template** only, and dropped when a
+> request is built from it. A quote from the IRS describes the item as Gather ships it and
+> stops being true the moment a firm edits its copy. This also avoided adding a `sources`
+> column to `item`, so §4.4 is unchanged.
+>
+> **Deviation (P2).** Drag-reorder is hand-written (~110 lines, pointer events + arrow
+> keys) rather than taken from `@dnd-kit`. Checked on 2026-07-28: the stable line
+> (`@dnd-kit/core` 6.3.1, `@dnd-kit/sortable` 10.0.0) has not been published since December
+> 2024, and the maintained successor (`@dnd-kit/react` 0.5.0) is pre-1.0. For a single-axis
+> list neither trade is worth taking in a codebase that will hold tax documents. §7's
+> "prefer proven open-source components" still holds everywhere else.
+>
+> **Deviation (P2).** The mortgage template asks for the Social Security **card** as a file
+> rather than the number as text, departing from the CFPB checklist it is otherwise
+> transcribed from. Files are encrypted at rest from P3; a typed answer is a `jsonb` value.
+> Recorded in `templates/SOURCES.md` under "Deliberately not included".
 
 **Acceptance:** ① Create a request from each of the 4 built-ins; item counts and labels match
 `SOURCES.md`. ② Add one of every item type, reorder by drag, reload — order persists. ③ Save a
@@ -650,11 +682,29 @@ custom template, instantiate it, verify deep-copy (editing the copy doesn't muta
 
 **Demo script:**
 ```bash
-pnpm seed:templates
-# browser: New Request → "US Individual Tax Year-End" → shows real sections/items
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+docker compose logs web | grep 'built-in templates ready'   # installed 4 at boot
+
+# ① ② ③ ④ — all four criteria, driven through the real UI
+pnpm test:e2e -- builder.spec.ts
+
+# ① the four built-ins, and the requests the app instantiated from them
+docker compose exec -T db psql -U gather -c "
+  select key, jsonb_array_length(body->'sections') sections,
+         (select sum(jsonb_array_length(s->'items'))::int
+            from jsonb_array_elements(body->'sections') s) items
+  from template where firm_id is null order by key;"
+
+# ③ deep copy: the firm template keeps 14 items after its copy was edited down to 13
+docker compose exec -T db psql -U gather -c "
+  select 'template', (select sum(jsonb_array_length(s->'items'))::int
+                        from jsonb_array_elements(body->'sections') s)
+  from template where key = 'our-monthly-close';"
+
+# ④ every mutation, hash-chained
 docker compose exec -T db psql -U gather -c \
-  "select t.name,count(i.*) items from template t join ... group by 1;"
-pnpm test:e2e -- builder.spec.ts   # drag-reorder + persistence, headed video saved to artifacts/
+  "select id, action, left(hash,10) from audit_event order by id;"
+DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 ```
 
 ---
@@ -854,4 +904,5 @@ Each phase is designed to start from a cleared context. Read `CLAUDE.md`, then t
 `progress.md`, then `git log --oneline -20`.
 
 - ~~**Phase 1:** `Start Phase 1: Foundation, schema, auth, CI — per plan.md §9.`~~ — shipped.
-- **Phase 2:** `Start Phase 2: Request builder + real templates — per plan.md §9.`
+- ~~**Phase 2:** `Start Phase 2: Request builder + real templates — per plan.md §9.`~~ — shipped.
+- **Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`

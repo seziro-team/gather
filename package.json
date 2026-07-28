@@ -21,7 +21,10 @@
     "test:e2e": "playwright test",
     "db:generate": "pnpm --filter @gather/db db:generate",
     "db:migrate": "pnpm --filter @gather/db db:migrate",
-    "verify:audit": "pnpm --filter @gather/db verify:audit"
+    "seed:templates": "pnpm --filter @gather/db seed:templates",
+    "verify:audit": "pnpm --filter @gather/db verify:audit",
+    "docs:sources": "node scripts/template-sources.mjs",
+    "docs:sources:check": "node scripts/template-sources.mjs --check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

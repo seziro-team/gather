@@ -16,9 +16,9 @@ clients, seats or storage — only the disk you already pay for.
 ![PostgreSQL](https://img.shields.io/badge/postgres-%E2%89%A513-blue)
 
 > **Where this is up to.** Gather is being built in the open, in phases, against a public
-> plan ([`plan.md`](plan.md)). **v0.1.0 is Phase 1 of 8: the foundation.** What is listed
-> under "What works today" genuinely works end to end — everything else is not there yet
-> rather than half there. See the [roadmap](#roadmap).
+> plan ([`plan.md`](plan.md)). **Phase 2 of 8 is done: the request builder and the built-in
+> templates.** What is listed under "What works today" genuinely works end to end —
+> everything else is not there yet rather than half there. See the [roadmap](#roadmap).
 
 ---
 
@@ -55,16 +55,23 @@ yourself if you would rather hold it in your own secret store.
 - **PostgreSQL is the only service Gather needs.** No Redis, no broker, no object store.
 - **Accounts with TOTP two-factor**, required by default. Any authenticator app works —
   1Password, Aegis, Google Authenticator, Bitwarden — plus one-time backup codes.
-- **Tamper-evident audit trail.** Every sign-in, enrolment and firm change is written to
-  a hash-chained, append-only log. `UPDATE` and `DELETE` are blocked by a database
-  trigger; `pnpm verify:audit` re-checks the whole chain and exits non-zero if anything
-  was altered or removed.
-- **The full data model** for requests, sections, items, responses, files, magic-link
-  tokens and reminder schedules — migrated and ready for the phases that fill it.
+- **Clients and requests.** Add a client, build them a request out of sections and items —
+  file uploads, short and long text, yes/no, dates, choices and numbers — with required
+  flags, help text, drag-to-reorder (mouse, touch or arrow keys) and a live preview of
+  exactly what the client will see.
+- **Four real templates, included.** US individual tax year-end, new business onboarding,
+  mortgage application, monthly bookkeeping close. Every item in all four is transcribed
+  from published IRS, CFPB, SBA or Fannie Mae guidance and links to the page it came from —
+  see [`templates/SOURCES.md`](templates/SOURCES.md). Save any request of your own as a
+  template too; copies are independent, so editing one never changes the other.
+- **Tamper-evident audit trail.** Every sign-in, client change, request edit and template
+  save is written to a hash-chained, append-only log. `UPDATE` and `DELETE` are blocked by
+  a database trigger; `pnpm verify:audit` re-checks the whole chain and exits non-zero if
+  anything was altered or removed.
 - **Health endpoint, structured JSON logs, one-command Docker deployment.**
 
-Not yet: building requests, the client portal, uploads, reminders, approvals. Those are
-Phases 2–5.
+Not yet: sending a request to a client, the portal, uploads, reminders, approvals. Those
+are Phases 3–5.
 
 ## Verify the audit trail yourself
 
@@ -138,8 +145,8 @@ _Cloud is not available yet — it is Phase 7._
 | Phase |                                                           | Status     |
 | ----- | --------------------------------------------------------- | ---------- |
 | 1     | Foundation: schema, accounts, two-factor, audit trail, CI | ✅ shipped |
-| 2     | Request builder and real templates                        | next       |
-| 3     | Client portal and encrypted uploads                       | planned    |
+| 2     | Request builder and real templates                        | ✅ shipped |
+| 3     | Client portal and encrypted uploads                       | next       |
 | 4     | Reminder engine                                           | planned    |
 | 5     | Approve/reject, dashboard, zip, audit export              | planned    |
 | 6     | Security hardening pass                                   | planned    |
@@ -159,9 +166,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
 pnpm install
 docker compose up -d db
 cp .env.example .env
-pnpm build && pnpm db:migrate
+pnpm build && pnpm db:migrate && pnpm seed:templates
 pnpm dev
 ```
+
+The Docker image runs the migrations and installs the built-in templates itself on boot;
+`pnpm db:migrate` and `pnpm seed:templates` are for running from a source checkout.
+
+To change what the built-in templates ask for, edit `packages/core/src/templates/` and run
+`pnpm build && pnpm docs:sources`. CI fails if `templates/SOURCES.md` and the code
+disagree, and a test fails any built-in item that cites no source at all.
 
 ## Security
 
