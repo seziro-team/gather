@@ -233,3 +233,200 @@ Entry template:
      link was committed in the meantime.
 
 - **Next step (exact resume instruction):** `Start Phase 2: Request builder + real templates — per plan.md §9.`
+
+---
+
+## 2026-07-28 — Phase 2: Request builder + real templates
+
+- **Shipped:**
+  - **A template model in `@gather/core`** — a zod schema covering all seven item types with
+    per-type config (accepted extensions and file count; placeholder; date range; choice
+    options and multi-select; number range and unit), validating the templates Gather ships,
+    a firm's saved templates, and whatever the builder posts back, so anything that parses
+    can be instantiated.
+  - **Four built-in templates, 16 sections and 74 items, every item cited.** US individual
+    tax year-end (25), new business onboarding (18), mortgage application (17), monthly
+    bookkeeping close (14). Transcribed from IRS, CFPB, SBA and Fannie Mae Selling Guide
+    pages read live on 2026-07-28.
+  - **`templates/SOURCES.md`, generated** from the definitions by `pnpm docs:sources`, with
+    `pnpm docs:sources:check` in CI. It carries every item, its type, whether it is required,
+    and a numbered reference list with the verbatim quote behind it — plus a
+    "deliberately not included" section covering the three things a reader would look for
+    and not find.
+  - **Client CRUD** — add, edit, archive and restore, firm-scoped in the query itself rather
+    than checked afterwards, every mutation audited.
+  - **The request builder** — sections and items, all seven types, required flags, help text,
+    drag-to-reorder with the mouse, a finger or the arrow keys, edge auto-scroll, an unsaved-
+    changes guard, and a client preview rendered from the same data with the real controls.
+  - **Templates end to end** — build a request from any built-in or firm template, save a
+    request back as a template, delete your own (never a built-in), with deep copies in both
+    directions.
+  - Built-ins install themselves on first boot; `pnpm seed:templates` does the same from a
+    source checkout.
+
+- **Real-world proof (what actually ran):** a wiped stack
+  (`docker compose down -v` then `up -d --build`), healthy, then the whole suite.
+
+  **Boot installs the checklists before anyone has opened a browser:**
+
+  ```
+  {"level":"info","name":"gather","msg":"migrations applied","applied":2}
+  {"level":"info","name":"gather","msg":"built-in templates ready",
+   "installed":4,"updated":0,"unchanged":0}
+  ```
+
+  **① A request built from each of the four, checked against the published document.**
+  The end-to-end test parses `templates/SOURCES.md`, then creates a request from each
+  template through the real UI and asserts the counts and **all 74 item labels** appear:
+
+  ```
+  ✓ a request from each built-in template matches every count and label in SOURCES.md (4.8s)
+  ```
+
+  ```
+              key             | sections | items          template_key        | sections | items
+  --------------------------- +----------+-------        ---------------------------+----------+------
+   bookkeeping-monthly-close   |        4 |    14         bookkeeping-monthly-close  |        4 |   14
+   mortgage-application        |        4 |    17         mortgage-application       |        4 |   17
+   new-business-onboarding     |        4 |    18         new-business-onboarding    |        4 |   18
+   us-individual-tax-year-end  |        4 |    25         us-individual-tax-year-end |        4 |   25
+        (seeded at boot)                                       (instantiated by the app)
+  ```
+
+  **② One of every item type, dragged, and still there after a reload.** The drag is a real
+  pointer drag — `mouse.down`, twenty `mouse.move` steps, `mouse.up` — not a synthetic
+  reorder call. The keyboard path is asserted separately:
+
+  ```
+  ✓ adds one of every item type, reorders by drag, and the order survives a reload (4.2s)
+  ```
+
+  Order in the database afterwards, showing the drag (item 1 → position 3) and then the
+  ArrowDown swap:
+
+  ```
+     type   |        label
+  ----------+---------------------
+   longtext | 3. Long text item
+   text     | 2. Short text item
+   file     | 1. File upload item
+   yesno    | 4. Yes / no item
+   date     | 5. Date item
+   choice   | 6. Choice item
+   number   | 7. Number item
+  ```
+
+  **③ Deep copy.** A request built from the "Monthly bookkeeping close" built-in was saved
+  as the firm's own template, a second request was built from *that*, an item was deleted
+  from the second, and both the template and the original request were then re-checked:
+
+  ```
+              what            | items
+  ----------------------------+-------
+   template our-monthly-close |    14
+   request  February close    |    13
+  ```
+
+  ```
+  ✓ a request saved as a template produces an independent copy (3.6s)
+  ```
+
+  **④ Every mutation, hash-chained.** One firm driven through all nine mutating actions:
+
+  ```
+   id |              action              |    prev    |    hash
+  ----+----------------------------------+------------+------------
+   46 | client.created                   | b09553e600 | 53fdee5595
+   47 | client.updated                   | 53fdee5595 | 8a73d42e6b
+   48 | request.created                  | 8a73d42e6b | ebf684ff44
+   49 | request.structure_updated        | ebf684ff44 | cd8ce0df81
+   50 | request.updated                  | cd8ce0df81 | c0a1d25fa1
+   51 | template.created                 | c0a1d25fa1 | fa3cafe0ea
+   52 | template.deleted                 | fa3cafe0ea | 51fb2e4e0f
+   53 | request.deleted                  | 51fb2e4e0f | 3d5d545370
+   54 | client.archived                  | 3d5d545370 | 149c5e0918
+
+   id |           action           | actor_type | firm_id |          template          | items
+  ----+----------------------------+------------+---------+----------------------------+-------
+    1 | template.builtin_installed | system     |         | us-individual-tax-year-end |    25
+    2 | template.builtin_installed | system     |         | new-business-onboarding    |    18
+    3 | template.builtin_installed | system     |         | mortgage-application       |    17
+    4 | template.builtin_installed | system     |         | bookkeeping-monthly-close  |    14
+
+  $ pnpm verify:audit
+  OK: 64 events, chain intact (head d1c023227e94…)          exit=0
+  ```
+
+  **Suites.** `Test Files 5 passed | Tests 56 passed` (25 from Phase 1, 19 template, 12
+  structure and seeding) against a real PostgreSQL; `9 passed (35.4s)` end to end against the
+  built image; lint, format, typecheck and `pnpm docs:sources:check` all clean.
+
+- **Decisions & why:**
+  - **`templates/SOURCES.md` is generated, not written.** The document exists to make
+    "no invented checklists" checkable. A hand-maintained copy would drift from the code on
+    the first edit and quietly stop being true, so the citation lives on the item in
+    `packages/core/src/templates/`, the document is derived from it, and CI fails if they
+    disagree. A test separately fails any built-in item with no citation at all.
+  - **Every cited URL was fetched before it was written down.** 52 distinct addresses; 49
+    return HTTP 200 to a scripted request and the three `consumerfinance.gov` pages refuse
+    those outright and were read through a browser-equivalent fetch. Two intended citations
+    turned out not to exist at the obvious address — `about-schedule-k-1-form-1065` is a 404,
+    and there is no `about-form-4506-c` — and two more (`uscis.gov/i-9`, Fannie Mae's Form
+    1003 page) block every kind of automated read, so the I-9 item cites IRS Publication 15
+    quoting the requirement instead and the 1003 was dropped. All of which is why they were
+    checked rather than recalled.
+  - **The mortgage template asks for the Social Security *card*, not the number.** The CFPB
+    checklist it is otherwise transcribed from says "Social Security number". Uploaded files
+    are encrypted at rest from Phase 3; a typed answer is a `jsonb` value in Postgres. Same
+    information, better handling, and the departure is stated in the document rather than
+    hidden.
+  - **Citations stop at the template.** They are dropped when a request is built, because a
+    quote from the IRS describes the item as Gather ships it and stops being true the moment
+    a firm edits its copy. This also kept `item` free of a `sources` column, so §4.4 did not
+    change.
+  - **Row identity is preserved across a save.** The builder posts the whole structure with
+    ids; `replaceRequestStructure` updates what it recognises, inserts what it does not, and
+    deletes what is gone. Responses, files and review decisions will hang off `item.id` from
+    Phase 3, so rewriting the rows on every save would silently discard a client's answers.
+    An id that does not already belong to the request is treated as new rather than adopted —
+    tested with a payload carrying another request's ids.
+  - **Drag-reorder was written, not installed.** `@dnd-kit/core` 6.3.1 and
+    `@dnd-kit/sortable` 10.0.0 have not been published since December 2024; the maintained
+    successor `@dnd-kit/react` is at 0.5.0. Neither an 18-month-stale dependency nor a
+    pre-1.0 API is worth taking for a single-axis list. Pointer events rather than HTML5
+    drag-and-drop, because HTML5 drag does not fire on touch, and arrow keys on the focused
+    handle do the same job with no pointer at all.
+  - **The preview is inert on purpose.** It renders the real controls from the real
+    structure, inside a disabled fieldset, under a banner saying so. A half-live form on the
+    firm's side of the product would be a lie about what has been built.
+  - **Explicit save, not autosave.** Autosave belongs to the client portal, where the person
+    typing has no reason to know what a save button is for. On the firm's side an unsaved-
+    changes indicator plus a `beforeunload` guard is the honest arrangement.
+
+- **Deviations from plan:** five, all written into `plan.md` §9 — generated `SOURCES.md`;
+  built-ins installed at boot rather than by `pnpm seed:templates`; citations kept on the
+  template only; hand-written drag-reorder; and the Social Security card/number departure.
+  Also worth recording: the first end-to-end drag failed and the failure was real. The
+  handle's bounding box was at `y = -76` — above the viewport — so the pointer never landed
+  on it. Fixing the test exposed a genuine gap, that a long checklist could not be dragged
+  past the edge of the window at all, and edge auto-scroll was added because of it.
+
+- **Known issues:**
+  1. **Items reorder within their section, and sections reorder among themselves — an item
+     cannot be dragged into a different section.** Delete and re-add is the workaround. Worth
+     doing properly, but it is not what Phase 2 promised.
+  2. **"Save as template" always creates a new template.** There is no way to update one in
+     place, so iterating on a firm template leaves a trail of copies.
+  3. **Deleting an item deletes its responses**, by `on delete cascade`. Nothing can answer
+     an item yet, so nothing is at risk today — but Phase 3 must refuse to delete an item
+     that has been answered, or say plainly what will be lost.
+  4. **A request cannot be sent.** There is no portal, no token and no email until Phases 3
+     and 4; the request page says so rather than showing a button that does nothing.
+  5. **No pagination anywhere** — clients, requests and templates all render in full. Fine
+     for a firm's first year, not for its fifth.
+  6. **`auth.sign_up` still carries a NULL `firm_id`** (carried over from Phase 1), so it is
+     absent from the firm-scoped views. Phase 5's audit export should union on membership.
+  7. **Dependabot #4 (TypeScript 5.9 → 6.0.3) still must not be merged** until
+     `typescript-eslint` supports TypeScript ≥ 6.1.
+
+- **Next step (exact resume instruction):** `Start Phase 3: Client portal + real uploads — per plan.md §9.`
