@@ -22,11 +22,16 @@ export function getAuth(): ReturnType<typeof createAuth> {
   return instance;
 }
 
-/** Audit actions raised from the authentication layer. */
+/**
+ * Audit actions raised from the authentication layer.
+ *
+ * Sign-out is deliberately absent: this hook runs after the endpoint, by which point the
+ * session is revoked and the actor is unknowable. `signOutAction` records it instead,
+ * before revoking.
+ */
 export const AUTH_AUDIT_ACTIONS = {
   '/sign-up/email': 'auth.sign_up',
   '/sign-in/email': 'auth.sign_in',
-  '/sign-out': 'auth.sign_out',
   '/two-factor/enable': 'auth.two_factor.enable_requested',
   '/two-factor/verify-totp': 'auth.two_factor.verified',
   '/two-factor/verify-backup-code': 'auth.two_factor.backup_code_used',

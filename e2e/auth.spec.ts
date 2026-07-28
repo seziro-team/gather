@@ -69,6 +69,8 @@ test('owner signs up, enrols TOTP, and signs back in with an authenticator code'
   await expect(page.getByRole('heading', { name: 'Audit trail' })).toBeVisible();
   await expect(page.getByText('Firm created')).toBeVisible();
   await expect(page.getByText('Two-factor code verified').first()).toBeVisible();
+  // Sign-out is recorded before the session is revoked, so it must be here too.
+  await expect(page.getByText('Signed out')).toBeVisible();
 });
 
 test('a wrong two-factor code is refused', async ({ page }) => {

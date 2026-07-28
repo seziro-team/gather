@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { env } from '@gather/core';
+import { auditForUser } from '@/lib/audit';
 import { getAuth } from '@/lib/auth';
 import { createFirmForUser } from '@/lib/firm';
 import { requestContext } from '@/lib/request-context';
@@ -176,6 +177,12 @@ export async function createFirmAction(_prev: FormState, formData: FormData): Pr
 }
 
 export async function signOutAction(): Promise<void> {
-  await getAuth().api.signOut({ headers: await headers() });
+  const requestHeaders = await headers();
+  // Recorded before the session is revoked: Better Auth's after-hook runs once the
+  // session is already gone, so by then there is no actor left to attribute it to.
+  const session = await getAuth().api.getSession({ headers: requestHeaders });
+  if (session) await auditForUser(session.user.id, 'auth.sign_out');
+
+  await getAuth().api.signOut({ headers: requestHeaders });
   redirect('/sign-in');
 }
