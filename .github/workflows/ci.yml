@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same branch — CI should tell you about your latest push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.20.0'
+
+jobs:
+  check:
+    name: Typecheck, lint, test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: gather
+          POSTGRES_PASSWORD: gather
+          POSTGRES_DB: gather_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gather -d gather_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Workspace packages compile to dist/ before anything consumes them.
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check formatting
+        run: pnpm format
+
+      - name: Test
+        run: pnpm test
+        env:
+          TEST_DATABASE_URL: postgres://gather:gather@localhost:5432/gather_test
+
+      # Fails the build on a known high or critical advisory in a shipped dependency.
+      - name: Audit dependencies
+        run: pnpm audit --prod --audit-level high
+
+  e2e:
+    name: End-to-end against the built image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # GNU oath-toolkit generates the TOTP codes, standing in for an authenticator app.
+      - name: Install oathtool
+        run: sudo apt-get update && sudo apt-get install -y oathtool
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Builds and boots the real image the quickstart uses, not a dev server.
+      - name: Start Gather
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
+              curl -sS http://127.0.0.1:3000/api/health; echo; exit 0
+            fi
+            sleep 2
+          done
+          echo "Gather did not become healthy"; docker compose logs; exit 1
+
+      - name: Run end-to-end tests
+        run: pnpm test:e2e
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7

@@ -1,0 +1,30 @@
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets — never commit a real .env
+.env
+.env.*
+!.env.example
+
+# runtime state
+data/
+uploads/
+
+# test + demo artefacts
+coverage/
+playwright-report/
+test-results/
+artifacts/
+
+# editors / OS
+.DS_Store
+*.log
+.idea/
+.vscode/

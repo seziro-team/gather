@@ -1,0 +1,65 @@
+name: gather
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gather}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gather}
+      POSTGRES_DB: ${POSTGRES_DB:-gather}
+    volumes:
+      # Postgres 18's image expects a single mount at /var/lib/postgresql and places the
+      # cluster in a version-named subdirectory; mounting .../data instead makes the
+      # container refuse to start. See docker-library/postgres#1259.
+      - gather-db:/var/lib/postgresql
+    # Bound to loopback only: this is here so host-side tooling (psql, pnpm verify:audit)
+    # can reach the database. It is never exposed to the network.
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-gather} -d ${POSTGRES_DB:-gather} -q']
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gather/web:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Built from the POSTGRES_* values above so one place defines the credentials.
+      DATABASE_URL: postgres://${POSTGRES_USER:-gather}:${POSTGRES_PASSWORD:-gather}@db:5432/${POSTGRES_DB:-gather}
+      GATHER_APP_URL: ${GATHER_APP_URL:-http://localhost:3000}
+      # Optional: left empty, the container generates one on first boot and keeps it
+      # in the gather-data volume. See docker/entrypoint.sh.
+      GATHER_AUTH_SECRET: ${GATHER_AUTH_SECRET:-}
+      GATHER_ALLOW_SIGNUP: ${GATHER_ALLOW_SIGNUP:-first-user-only}
+      GATHER_REQUIRE_2FA: ${GATHER_REQUIRE_2FA:-true}
+      GATHER_LOG_LEVEL: ${GATHER_LOG_LEVEL:-info}
+      GATHER_AUTO_MIGRATE: ${GATHER_AUTO_MIGRATE:-true}
+    volumes:
+      # Holds the generated signing secret, and from Phase 3 the local storage driver's
+      # uploads. Backing this up is backing up Gather's state, alongside the database.
+      - gather-data:/app/data
+    ports:
+      - '${GATHER_PORT:-3000}:3000'
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -q -O- http://127.0.0.1:3000/api/health | grep -q ''"status":"ok"''']
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+volumes:
+  gather-db:
+  gather-data:

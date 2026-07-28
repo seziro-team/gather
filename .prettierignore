@@ -1,0 +1,12 @@
+pnpm-lock.yaml
+packages/db/drizzle/
+.next/
+dist/
+coverage/
+playwright-report/
+test-results/
+artifacts/
+LICENSE
+plan.md
+progress.md
+CLAUDE.md

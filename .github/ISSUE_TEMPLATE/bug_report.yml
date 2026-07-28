@@ -1,0 +1,71 @@
+name: Bug report
+description: Something in Gather does not work as described
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If this is a **security** issue, please do not file it here —
+        see [SECURITY.md](../blob/main/SECURITY.md) for private reporting.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what did Gather do instead of what you expected?
+      placeholder: |
+        1. Signed in as the owner
+        2. Opened Security and clicked "Set up authenticator app"
+        3. Expected a QR code; got a 500
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Gather version
+      description: The release tag, or the commit you built from.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it running?
+      options:
+        - docker compose (the quickstart)
+        - Docker, custom setup
+        - From source (pnpm dev)
+        - Gather Cloud
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        `docker compose logs web --tail 100`. Gather redacts secrets, but please re-read
+        before pasting — logs from a real firm may contain client names or email addresses.
+      render: shell
+
+  - type: textarea
+    id: health
+    attributes:
+      label: Health output
+      description: Output of `curl -s localhost:3000/api/health`
+      render: json
+
+  - type: input
+    id: environment
+    attributes:
+      label: Host OS and Docker version
+      placeholder: Ubuntu 24.04, Docker 29.1.3

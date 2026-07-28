@@ -1,0 +1,38 @@
+@import 'tailwindcss';
+
+/*
+ * No web fonts and no external stylesheets anywhere in Gather: a self-hosted install
+ * must not make requests to third parties, and a client opening a portal link from a
+ * phone on a bad connection should not wait on a font download.
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --color-brand-50: oklch(0.98 0.02 180);
+  --color-brand-100: oklch(0.95 0.04 180);
+  --color-brand-200: oklch(0.9 0.07 180);
+  --color-brand-300: oklch(0.83 0.1 180);
+  --color-brand-400: oklch(0.72 0.12 180);
+  --color-brand-500: oklch(0.63 0.12 180);
+  --color-brand-600: oklch(0.55 0.11 180);
+  --color-brand-700: oklch(0.46 0.09 181);
+  --color-brand-800: oklch(0.39 0.07 182);
+  --color-brand-900: oklch(0.33 0.05 183);
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Visible focus everywhere — the portal has to be usable by keyboard and screen reader. */
+:focus-visible {
+  @apply outline-brand-600 outline-2 outline-offset-2;
+}

@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest something Gather should do
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gather does one job: collecting documents from clients and chasing until it's
+        complete. Practice management, CRM, billing, tax preparation and anything
+        requiring your *client* to create an account are explicit non-goals — see
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md).
+
+        Please also check [plan.md](../blob/main/plan.md) first: much of what Gather will
+        do is already scheduled into a phase.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the real situation, not the solution you have in mind.
+      placeholder: |
+        Every January I send the same organizer to 300 clients. Right now I would have to
+        build the request 300 times.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you handle it today?
+      description: Another tool, a spreadsheet, email? What does that cost you?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Gather to do?
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who is this for?
+      options:
+        - Self-hosted firms
+        - Gather Cloud
+        - Both
+    validations:
+      required: true

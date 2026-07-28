@@ -1,0 +1,44 @@
+{
+  "name": "@gather/db",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.js"
+    },
+    "./migrator": {
+      "types": "./dist/migrator.d.ts",
+      "import": "./dist/migrator.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --enable-source-maps dist/cli/migrate.js",
+    "verify:audit": "node --enable-source-maps dist/cli/verify-audit.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@gather/core": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.6",
+    "drizzle-kit": "^0.31.10"
+  }
+}
