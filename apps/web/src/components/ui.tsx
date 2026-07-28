@@ -6,26 +6,26 @@ function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
 }
 
+/** Shared with `Button` so a link that acts as a button is not a different-looking thing. */
+export const buttonClasses = {
+  base: 'inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed',
+  primary: 'bg-brand-700 text-white hover:bg-brand-800 disabled:bg-brand-700/50',
+  secondary: 'bg-white text-slate-800 ring-1 ring-slate-300 hover:bg-slate-50',
+  danger: 'bg-red-700 text-white hover:bg-red-800',
+} as const;
+
 export function Button({
   variant = 'primary',
   className,
   ...props
 }: ComponentProps<'button'> & { variant?: 'primary' | 'secondary' | 'danger' }) {
-  const styles = {
-    primary: 'bg-brand-700 text-white hover:bg-brand-800 disabled:bg-brand-700/50',
-    secondary: 'bg-white text-slate-800 ring-1 ring-slate-300 hover:bg-slate-50',
-    danger: 'bg-red-700 text-white hover:bg-red-800',
-  }[variant];
   return (
-    <button
-      {...props}
-      className={cx(
-        'inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed',
-        styles,
-        className,
-      )}
-    />
+    <button {...props} className={cx(buttonClasses.base, buttonClasses[variant], className)} />
   );
+}
+
+export function linkButton(variant: 'primary' | 'secondary' | 'danger' = 'primary'): string {
+  return `${buttonClasses.base} ${buttonClasses[variant]}`;
 }
 
 export function Field({
@@ -80,6 +80,75 @@ export function Alert({
     >
       {title ? <p className="font-semibold">{title}</p> : null}
       <div className={title ? 'mt-1' : undefined}>{children}</div>
+    </div>
+  );
+}
+
+export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
+  return (
+    <textarea
+      {...props}
+      className={cx(
+        'focus:ring-brand-600 block w-full rounded-md border-0 bg-white px-3 py-2.5 text-slate-900 ring-1 ring-slate-300 ring-inset placeholder:text-slate-400 focus:ring-2',
+        className,
+      )}
+    />
+  );
+}
+
+export function Select({ className, ...props }: ComponentProps<'select'>) {
+  return (
+    <select
+      {...props}
+      className={cx(
+        'focus:ring-brand-600 block w-full rounded-md border-0 bg-white px-3 py-2.5 text-slate-900 ring-1 ring-slate-300 ring-inset focus:ring-2',
+        className,
+      )}
+    />
+  );
+}
+
+export function Badge({
+  tone = 'neutral',
+  children,
+}: {
+  tone?: 'neutral' | 'brand' | 'amber' | 'green';
+  children: ReactNode;
+}) {
+  const styles = {
+    neutral: 'bg-slate-100 text-slate-700 ring-slate-200',
+    brand: 'bg-brand-50 text-brand-800 ring-brand-200',
+    amber: 'bg-amber-50 text-amber-800 ring-amber-200',
+    green: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+  }[tone];
+  return (
+    <span
+      className={cx(
+        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
+        styles,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+export function PageHeader({
+  title,
+  description,
+  actions,
+}: {
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
+        {description ? <div className="mt-1 text-sm text-slate-600">{description}</div> : null}
+      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }

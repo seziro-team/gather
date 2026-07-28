@@ -20,9 +20,18 @@ export function AppShell({
             <Wordmark />
           </Link>
           <span className="text-sm text-slate-500">{firmName}</span>
-          <nav className="ml-auto flex items-center gap-4 text-sm">
+          <nav className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
             <Link href="/dashboard" className="text-slate-600 hover:text-slate-900">
               Dashboard
+            </Link>
+            <Link href="/requests" className="text-slate-600 hover:text-slate-900">
+              Requests
+            </Link>
+            <Link href="/clients" className="text-slate-600 hover:text-slate-900">
+              Clients
+            </Link>
+            <Link href="/templates" className="text-slate-600 hover:text-slate-900">
+              Templates
             </Link>
             <Link href="/account/security" className="text-slate-600 hover:text-slate-900">
               Security

@@ -1,0 +1,86 @@
+import { expect, type Page } from '@playwright/test';
+import { totp } from './totp';
+
+const PASSWORD = 'correct horse battery staple';
+
+export function uniqueEmail(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}@gather.test`;
+}
+
+/**
+ * Signs up an owner and finishes two-factor enrolment, leaving the page on the dashboard.
+ *
+ * Every test that touches firm data needs this: `requireReadyUser` refuses to serve
+ * client data to an account without a second factor, which is the point of it.
+ */
+export async function signUpOwner(page: Page, prefix: string): Promise<{ email: string }> {
+  const email = uniqueEmail(prefix);
+
+  await page.goto('/sign-up');
+  await page.getByLabel('Your name').fill('Alex Partner');
+  await page.getByLabel('Firm name').fill(`${prefix} Accountants`);
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Create account' }).click();
+
+  await expect(page).toHaveURL(/\/account\/security/);
+  await page.getByLabel('Your password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Set up authenticator app' }).click();
+
+  const secret = (await page.getByTestId('totp-secret').innerText()).trim();
+  await page.getByLabel('Enter the current 6-digit code to finish').fill(totp(secret));
+  await page.getByRole('button', { name: 'Turn on two-factor' }).click();
+  await expect(page).toHaveURL(/\/dashboard/);
+
+  return { email };
+}
+
+export async function addClient(page: Page, name: string): Promise<string> {
+  const email = uniqueEmail(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+  await page.goto('/clients/new');
+  await page.getByLabel('Name').fill(name);
+  await page.getByLabel('Email').fill(email);
+  await page.getByRole('button', { name: 'Add client' }).click();
+  await expect(page).toHaveURL(/\/clients$/);
+  await expect(page.getByRole('link', { name })).toBeVisible();
+  return email;
+}
+
+/** Creates a request and lands on its builder. Pass a template name, or nothing for blank. */
+export async function newRequest(
+  page: Page,
+  title: string,
+  templateName?: string,
+): Promise<string> {
+  await page.goto('/requests/new');
+  if (templateName) {
+    // Option labels carry their item count ("… (25 items)"), so match on the name and read
+    // the value rather than hard-coding a number the templates are free to change.
+    const value = await page
+      .locator('select[name="templateId"] option')
+      .filter({ hasText: templateName })
+      .first()
+      .getAttribute('value');
+    if (!value) throw new Error(`No template option matching "${templateName}"`);
+    await page.getByLabel('Start from').selectOption(value);
+  }
+  await page.getByLabel('Title').fill(title);
+  await page.getByRole('button', { name: 'Create request' }).click();
+  await expect(page).toHaveURL(/\/requests\/[0-9a-f-]+\/edit$/);
+
+  const id = new URL(page.url()).pathname.split('/')[2];
+  if (!id) throw new Error(`Could not read a request id from ${page.url()}`);
+  return id;
+}
+
+/** The labels currently on screen in the builder, top to bottom. */
+export async function itemLabels(page: Page): Promise<string[]> {
+  return page
+    .getByLabel('What are you asking for?')
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
+}
+
+export async function saveChecklist(page: Page): Promise<void> {
+  await page.getByTestId('save').click();
+  await expect(page.getByTestId('save-status')).toContainText('Saved at');
+}

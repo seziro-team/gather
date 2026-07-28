@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { count, desc, eq, isNull, and } from 'drizzle-orm';
 import { auditEvent, client, getDb, request } from '@gather/db';
-import { Alert, Card } from '@/components/ui';
+import { Alert, Card, linkButton } from '@/components/ui';
 import { requireReadyUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +18,16 @@ const ACTION_LABELS: Record<string, string> = {
   'auth.two_factor.backup_code_used': 'Backup code used',
   'firm.created': 'Firm created',
   'firm.member_added': 'Member added',
+  'client.created': 'Client added',
+  'client.updated': 'Client updated',
+  'client.archived': 'Client archived',
+  'client.restored': 'Client restored',
+  'request.created': 'Request created',
+  'request.updated': 'Request details changed',
+  'request.structure_updated': 'Checklist changed',
+  'request.deleted': 'Request deleted',
+  'template.created': 'Template saved',
+  'template.deleted': 'Template deleted',
 };
 
 export default async function DashboardPage() {
@@ -67,10 +77,25 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      <Alert tone="info" title="This install is ready, and empty">
-        Foundations are in place: schema, accounts, two-factor authentication and the audit trail
-        below. Building and sending requests arrives in the next release.
-      </Alert>
+      {requestCount[0]?.total ? null : (
+        <Alert tone="info" title="Start here">
+          Add a client, then build their request from one of the four included templates — or from
+          nothing, if you would rather. Sending the request to the client, and the reminders that
+          chase it, arrive in the next two releases.
+        </Alert>
+      )}
+
+      <div className="flex flex-wrap gap-3">
+        <Link href="/requests/new" className={linkButton()}>
+          New request
+        </Link>
+        <Link href="/clients/new" className={linkButton('secondary')}>
+          Add client
+        </Link>
+        <Link href="/templates" className={linkButton('secondary')}>
+          Browse templates
+        </Link>
+      </div>
 
       <Card>
         <div className="mb-4 flex items-baseline justify-between gap-4">
