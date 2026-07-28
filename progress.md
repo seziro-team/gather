@@ -361,6 +361,11 @@ Entry template:
   structure and seeding) against a real PostgreSQL; `9 passed (35.4s)` end to end against the
   built image; lint, format, typecheck and `pnpm docs:sources:check` all clean.
 
+  **CI green on the pull request** — <https://github.com/seziro-team/gather/pull/5>, run
+  `30362999044`. Both jobs succeeded: *Typecheck, lint, test* in **1m45s** (including the new
+  `Check template sources are documented` step) and *End-to-end against the built image* in
+  **2m45s**. Merged as `23ccce3`.
+
 - **Decisions & why:**
   - **`templates/SOURCES.md` is generated, not written.** The document exists to make
     "no invented checklists" checkable. A hand-maintained copy would drift from the code on
