@@ -58,7 +58,7 @@ export default tseslint.config(
 
   // CLIs talk to the operator on stdout/stderr; that is their interface, not logging.
   {
-    files: ['packages/db/src/cli/**/*.ts', 'e2e/**/*.ts', '*.config.{ts,mjs}'],
+    files: ['packages/db/src/cli/**/*.ts', 'e2e/**/*.ts', 'scripts/**/*.mjs', '*.config.{ts,mjs}'],
     rules: { 'no-console': 'off' },
   },
 

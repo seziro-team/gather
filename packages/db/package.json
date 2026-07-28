@@ -18,6 +18,10 @@
     "./migrator": {
       "types": "./dist/migrator.d.ts",
       "import": "./dist/migrator.js"
+    },
+    "./seed": {
+      "types": "./dist/seed.d.ts",
+      "import": "./dist/seed.js"
     }
   },
   "files": [
@@ -29,6 +33,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --enable-source-maps dist/cli/migrate.js",
+    "seed:templates": "node --enable-source-maps dist/cli/seed-templates.js",
     "verify:audit": "node --enable-source-maps dist/cli/verify-audit.js",
     "clean": "rm -rf dist"
   },

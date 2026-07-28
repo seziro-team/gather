@@ -38,3 +38,33 @@ export {
   INSECURE_DEV_AUTH_SECRET,
   type Env,
 } from './env.js';
+
+export {
+  countItems,
+  instantiateBody,
+  parseTemplateBody,
+  templateBodySchema,
+  templateItemSchema,
+  templateSectionSchema,
+  templateSourceSchema,
+  ITEM_TYPES,
+  ITEM_TYPE_LABELS,
+  TemplateBodyError,
+  type ItemType,
+  type TemplateBody,
+  type TemplateBodyInput,
+  type TemplateItem,
+  type TemplateItemInput,
+  type TemplateSection,
+  type TemplateSectionInput,
+  type TemplateSource,
+} from './template.js';
+
+export {
+  BUILTIN_TEMPLATES,
+  builtinItemCounts,
+  findBuiltinTemplate,
+  SOURCES,
+  type BuiltinTemplate,
+  type SourceKey,
+} from './templates/index.js';
