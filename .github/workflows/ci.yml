@@ -95,6 +95,21 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # `review.spec.ts` ⑤ runs `pnpm verify:audit --csv` from the *host*, not inside the
+      # container — that is the claim being tested: a firm can hand the CSV to somebody
+      # with no access to Gather and no database, and they can recompute every hash. The
+      # verifier is a compiled CLI, so this job needs it built even though everything else
+      # it tests runs in Docker.
+      #
+      # Two explicit steps rather than `--filter ...@gather/db`: that selector builds the
+      # package and its dependencies, but not in order — core and db start together and db
+      # fails against a dist/ that does not exist yet. tsc emits anyway, so the failure is
+      # quiet and the CLI it leaves behind is half-built.
+      - name: Build the audit verifier
+        run: |
+          pnpm --filter @gather/core build
+          pnpm --filter @gather/db build
+
       # Chromium for the firm's dashboard, WebKit for the client's phone. The portal suite
       # runs on WebKit at 390x844 because iOS Safari is what most of a small firm's clients
       # are actually holding, and it is not Chromium with a narrower window.
