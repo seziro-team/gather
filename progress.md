@@ -1444,6 +1444,23 @@ Entry template:
   The built page loaded in Chromium at 1280×900 and in WebKit at 390×844: **no console
   errors, no failed requests, no horizontal overflow at either size.**
 
+  **The quickstart, timed for real** (plan.md §9 Phase 1 acceptance ①, re-run here because
+  Phase 8 is where the README makes the claim publicly). Clean `git clone` into a temporary
+  directory, `cp .env.example .env`, `docker compose up -d --build`, polling `/api/health`
+  until `status: ok`, with `docker builder prune -af` first so nothing was cached:
+
+  ```
+  COLD_BUILD_AND_BOOT_SECONDS=332      # 5 min 32 s, empty build cache
+  {"status":"ok","db":"ok","migrations":"applied","checkedAt":"2026-09-05T15:01:03.855Z"}
+
+  ELAPSED_SECONDS=19                   # same machine, image already built
+  ```
+
+  On an 8-core Xeon E5-2695 v4 with 8 GB of RAM. **That is 32 seconds over the five minutes
+  CLAUDE.md §5 asks for**, so the README states both numbers and the machine rather than
+  rounding down to a nicer sentence. Almost all of it is compiling the app inside the
+  container; the boot itself is seconds.
+
   Whole-repo state at the end of the phase:
 
   ```

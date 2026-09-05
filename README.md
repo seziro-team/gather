@@ -59,6 +59,17 @@ curl -fsS localhost:3000/api/health
 `status: ok` means the database answered _and_ the schema is current — the container
 applies migrations before it serves a single request.
 
+**How long that takes, measured rather than promised.** From `git clone` to `status: ok` on
+an 8-core Xeon E5-2695 v4 with 8 GB of RAM, Docker's build cache emptied first:
+
+|                                   |                |
+| --------------------------------- | -------------- |
+| Clean clone, cold build cache     | **5 min 32 s** |
+| Same machine, image already built | **19 s**       |
+
+Most of that is compiling the app inside the container. If your machine is slower than that
+one, most of the difference will land here rather than anywhere else.
+
 You did not have to invent a secret: with `GATHER_AUTH_SECRET` left empty, Gather
 generates a strong one on first boot and keeps it in the `gather-data` volume. Set it
 yourself if you would rather hold it in your own secret store.

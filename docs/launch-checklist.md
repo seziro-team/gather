@@ -8,7 +8,8 @@ checklist because "we'll remember" is how a launch goes out with a broken quicks
 - [ ] **A clean clone works.** On a machine that has never seen this repo:
       `git clone … && cd gather && cp .env.example .env && docker compose up -d`, then
       `curl -fsS localhost:3000/api/health` returns `"status":"ok"`, and the first account
-      can be created. Time it — the README claims five minutes.
+      can be created. Time it, and update the table in the README if the number has moved:
+      it is a measurement, not a slogan, and it should stay one.
 - [ ] `pnpm test` green, `pnpm build` green, `npx playwright test` green against the built
       image, CI green on `main`.
 - [ ] `pnpm audit --prod --audit-level high` clean.
