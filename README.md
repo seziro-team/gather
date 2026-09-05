@@ -307,7 +307,7 @@ disposed of on this date" is what disposal is supposed to leave behind.
 | 5     | Approve/reject, dashboard, zip, audit export              | ✅ shipped  |
 | 6     | Security hardening pass                                   | ✅ shipped  |
 | 7     | Team roles, Gather Cloud, billing, production deployment  | ✅ shipped¹ |
-| 8     | Website, docs, launch                                     | in progress |
+| 8     | Website, docs, launch                                     | ✅ shipped  |
 
 ¹ Everything but Stripe itself, which has never had an account to talk to. The gap and the
 procedure that closes it are in [`docs/stripe-verification.md`](docs/stripe-verification.md).

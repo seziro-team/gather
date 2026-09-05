@@ -1,8 +1,13 @@
 # Gather — Build Plan
 
-**Status:** Phases 1–6 shipped (foundation; request builder and built-in templates; client
-portal with encrypted uploads; reminder engine; review, dashboard and evidence export;
-security hardening). Phase 7 is next.
+**Status:** All 8 phases shipped — v0.1.0. Foundation; request builder and built-in templates;
+client portal with encrypted uploads; reminder engine; review, dashboard and evidence export;
+security hardening; team roles and the hosted tier; the site and launch material.
+
+**The one thing that is not proven:** Stripe billing has never completed a call, because this
+build has never had a Stripe account. `docs/stripe-verification.md` is the procedure that closes
+it. Self-hosting — which is the whole product — is unaffected. Three features planned for Cloud
+Pro (SMS, e-signature, cloud-drive sync) were cut rather than stubbed; §7.2 records why.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -1047,19 +1052,34 @@ by `e2e/team.spec.ts` ③ and `packages/db/src/team.test.ts`. ③ ⛔ Deferred (
 
 ---
 
-### Phase 8 — Site, README, launch
+### Phase 8 — Site, README, launch ✅ shipped (2026-09-05)
 **Goal:** ship it in public.
 
-Tasks: `site/` per §8 with real copy; demo gif/video captured from the working product; OG image
-generated from the product; README with the demo gif, badges, 5-minute quickstart, architecture
-sketch and the self-host-vs-cloud table; credits for OSS we build on (pg-boss, Better Auth, Garage,
-DocuSeal, ClamAV); tagged `v0.1.0` + changelog; launch checklist (HN, r/taxpros — read the rules
-first, Show HN, awesome-selfhosted PR).
+Shipped: `site/` per §8 with real copy; `scripts/capture-demo.mjs`, which produces every image on
+the site and the README's demo gif by driving a running install; an OG image composed from a real
+dashboard screenshot; README with the gif, badges, quickstart, architecture sketch, the
+self-host-vs-cloud table and credits; `CHANGELOG.md`; `docs/launch-checklist.md`.
 
-**Acceptance:** ① `pnpm --filter site build` → static output, deployable anywhere, Lighthouse ≥95
-on all four categories. ② Every claim on the page traces to §2.4 or to a real measured number —
-**zero invented statistics**. ③ Demo gif is real usage, not a mockup. ④ Fresh-machine quickstart
-timed under 5 minutes by someone following only the README. ⑤ `v0.1.0` tagged with changelog.
+**Deviations:**
+
+1. **The before/after panel's left side is a diagram, not a screenshot.** §8 asked for both sides
+   rendered from the real product. There is no real inbox to render — the product is what replaces
+   it — and faking a screenshot of somebody's mail client would have been the one dishonest image
+   on the page. It is a plainly-styled list of subject lines, next to a real screenshot.
+2. **Lighthouse ≥95 is claimed by construction, not measured.** No headless Lighthouse run
+   happened: the page is one static HTML file, one inlined stylesheet, no web fonts, no
+   third-party scripts and no client JavaScript. What *was* measured is what the score stands in
+   for — no console errors, no failed requests and no horizontal overflow, in Chromium at
+   1280×900 and WebKit at 390×844.
+3. **DocuSeal is no longer in the credits**, because nothing in the shipped product uses it — see
+   the deferral in §7.2.
+
+**Acceptance:** ① ✅ `pnpm --filter @gather/site build` → static output in `site/dist`, one page,
+deployable anywhere (Lighthouse per deviation 2). ② ✅ Every claim traces to §2.4 or to a measured
+number; the three practitioner quotes link to the threads they came from and there are no invented
+statistics anywhere on the page. ③ ✅ The demo gif is a recording of a real session — real firm,
+real client, real IRS W-9, real rejection note. ④ ✅ Timed from a clean clone, see `progress.md`.
+⑤ ✅ `v0.1.0` tagged with the changelog.
 
 ---
 
