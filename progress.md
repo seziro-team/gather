@@ -1546,6 +1546,13 @@ Entry template:
   3. `site/` is a pnpm workspace package rather than a standalone directory, so one
      `pnpm build` covers it.
 
+  **A second defect, this one in the harness rather than the product.** The reminder suite
+  had been reading Mailpit at a hard-coded `127.0.0.1:8026` — the port one machine happened
+  to need because 8025 was taken on it. Everywhere else, including CI, mailpit is on 8025
+  and every mail test failed with `ECONNREFUSED`. It now derives the port from
+  `MAILPIT_UI_PORT`, the same variable the compose overlay publishes on, and that variable
+  is documented in `.env.example` rather than living only in one person's `.env`.
+
 - **Known issues:**
   1. **`capture-demo.mjs` wants an install that has not been captured before.** It signs up
      `dana@delgado.example.com`, and on a second run against the same database that address

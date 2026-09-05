@@ -8,7 +8,16 @@ import { execFileSync } from 'node:child_process';
  * asserting on them is asserting on what a client would actually receive.
  */
 
-const INBOX = process.env.GATHER_MAILPIT_URL ?? 'http://127.0.0.1:8026';
+/**
+ * Where Mailpit's inbox API is.
+ *
+ * Derived from `MAILPIT_UI_PORT`, the same variable `docker-compose.mail.yml` publishes on
+ * — not a hard-coded number. It was 8026 here for a while because that is what one
+ * developer's machine happened to need, which meant the reminder suite passed for them and
+ * failed for everybody else, CI included, with `ECONNREFUSED`.
+ */
+const INBOX =
+  process.env.GATHER_MAILPIT_URL ?? `http://127.0.0.1:${process.env.MAILPIT_UI_PORT ?? 8025}`;
 
 export interface InboxMessage {
   id: string;
