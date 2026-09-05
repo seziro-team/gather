@@ -37,14 +37,23 @@ pnpm dev                         # http://localhost:3000
 ## Tests
 
 ```bash
-# Unit + database integration tests. Needs a scratch Postgres database.
-createdb gather_test   # or: psql -c 'create database gather_test'
-TEST_DATABASE_URL=postgres://gather:gather@localhost:5432/gather_test pnpm test
+# Unit + database integration tests. With the stack up, this needs no arguments: the
+# runner reads .env, and derives a `<database>_test` scratch database it can truncate —
+# it can never touch the one in DATABASE_URL.
+pnpm test
 
-# End-to-end, against a running install that allows sign-ups.
-sudo apt-get install -y oathtool          # generates real TOTP codes
-docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+# End-to-end, against a running install that allows sign-ups. The mail overlay adds
+# Mailpit, a real SMTP server that catches instead of relaying, so the reminder and
+# invitation tests assert on messages that were really sent.
+sudo apt-get install -y oathtool unzip    # real TOTP codes; a real extractor for the zip
+docker compose -f docker-compose.yml -f docker-compose.mail.yml \
+               -f docker-compose.test.yml up -d --build
 pnpm test:e2e
+
+# Opt-in suites, each with its own stack because each needs something the default
+# install deliberately does not have.
+pnpm test:antivirus   # ClamAV — wants 3–4 GiB of RAM and a ~350 MB signature database
+pnpm test:cloud       # the hosted tier: GATHER_CLOUD=true, plan limits, /admin
 ```
 
 The database tests are deliberately not mocked: the audit chain's correctness depends on
@@ -63,8 +72,9 @@ pnpm format          # pnpm format:write to fix
 pnpm test
 ```
 
-CI runs exactly these, plus `pnpm audit --prod --audit-level high` and the end-to-end
-suite against the built Docker image.
+CI runs exactly these, plus `pnpm audit --prod --audit-level high` and four end-to-end
+jobs against the built Docker image: the default stack, the same portal suite against a
+real S3 object store, ClamAV quarantine, and the hosted tier.
 
 ## House rules
 
@@ -79,18 +89,33 @@ suite against the built Docker image.
   `pnpm db:generate`; never hand-edit one that has already shipped.
 - **Audit anything that matters.** State changes that a firm might one day need to prove
   belong in the audit chain, and in the same transaction as the change itself.
+- **Say what is not proven.** If something ships without having really run — an
+  integration with no credentials, a path with no test — write it down where a user will
+  see it, not only in a commit message. `docs/stripe-verification.md` is the shape that
+  takes: what is proven, what is not, and the exact procedure that closes the gap.
 - Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`).
 
 ## Project layout
 
 ```
 apps/web            Next.js app — dashboard, portal, API routes
-packages/core       Pure logic: audit hashing, canonical JSON, env, logging
-packages/db         Drizzle schema, migrations, audit writer, CLIs
+apps/worker         Reminder sender and the retention purge, on pg-boss
+packages/core       Pure logic: audit hashing, canonical JSON, env, permissions, plans
+packages/db         Drizzle schema, migrations, audit writer, queries, CLIs
+packages/storage    Encryption, magic-byte sniffing, local and S3 drivers, ClamAV
+packages/mail       Resend and SMTP drivers, templates, DNS preflight, bounce webhooks
+packages/reminders   The send-once path, shared by the worker and the "send one now" button
+packages/billing    Stripe: checkout, portal, webhook verification, event → plan state
+site                The one-page marketing site (Astro, static)
 e2e                 Playwright specs
+docs                Threat model, Safeguards Rule mapping, incident response, launch
 plan.md             The full build spec and phase plan
 progress.md         What actually shipped in each phase, with evidence
 ```
+
+The site's screenshots are not committed by hand — `node scripts/capture-demo.mjs` drives
+a running install and writes them. If you change a screen that appears on the site, re-run
+it against a fresh stack rather than editing an image.
 
 `plan.md` is the source of truth for scope and sequencing. If a change alters
 architecture or scope, update it in the same pull request.
