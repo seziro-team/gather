@@ -28,3 +28,7 @@ overrides:
   # Dev-server request forgery in esbuild <=0.24.2, reached through better-auth's
   # drizzle-kit peer via the deprecated @esbuild-kit/* shims.
   esbuild: '>=0.25.0'
+  # GHSA-2v37-7h3g-55p8: a custom generator with size 0 loops forever. Reached through
+  # better-auth → vitest → vite → postcss, so it lands on the production path even though
+  # nothing we ship calls it.
+  nanoid: '>=3.3.18'
