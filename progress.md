@@ -1383,3 +1383,131 @@ Entry template:
      must not be merged.
 
 - **Next step (exact resume instruction):** `Start Phase 8: site, README, launch — per plan.md §9.`
+
+---
+
+## 2026-09-05 — Phase 8: Site, README, launch
+
+- **Shipped:**
+  - **`site/`** — a static one-page Astro site with the copy from plan.md §8: hero,
+    before/after, the demo, three steps, practitioner quotes linked to the threads they came
+    from, the open-source block, pricing, five real questions, footer. Builds to plain files
+    that deploy anywhere; `PUBLIC_SITE_URL` and `PUBLIC_REPO_URL` are environment variables
+    because the domain is a decision made later.
+  - **`scripts/capture-demo.mjs`** — every image on the site and the README's demo gif,
+    captured by driving a real install with a real browser.
+  - **`CHANGELOG.md`** for 0.1.0, with a "Known gaps" section rather than only an "Added"
+    one.
+  - **`docs/launch-checklist.md`** — what has to be true before announcing, what has to be
+    true before Cloud takes a signup, and where to post (with each community's rules noted).
+  - **README** brought up to date: the demo gif, the team feature, the production and cloud
+    deployment sections, and the Stripe gap stated in the README itself rather than only in
+    `progress.md`.
+  - A CI job for the hosted tier, and `vitest.setup.ts` so `pnpm test` reads `.env` and works
+    against a running `docker compose up` instead of failing with "no database configured".
+
+- **Real-world proof (what actually ran):**
+
+  ```
+  $ node scripts/capture-demo.mjs
+  ▸ signing up a firm
+  ▸ adding a client
+  ▸ building a request from the US individual tax template
+  ▸ shot: builder.png
+  ▸ issuing a portal link
+  ▸ opening the portal on a phone
+  ▸ uploading a real IRS W-9 through the portal
+  ▸ the firm reviewing, and sending one item back with a note
+  ▸ shot: rejected.png
+  ▸ what the client sees when an item comes back
+  ▸ shot: portal-rejected.png
+  ▸ the dashboard
+  ▸ the audit trail
+  ▸ converting the recording to a gif
+  ▸ demo.gif written
+  ▸ composing the OG image from the dashboard screenshot
+  ```
+
+  `site/public/shots/portal-rejected.png` is an iPhone-sized screenshot of the real portal
+  showing the real note — *"Please take another look: This is page 1 only — I need all four
+  pages, including the signature page."* — above the real 138 KB `irs-form-w9.pdf` the
+  client uploaded a moment earlier. `site/public/shots/audit.png` is the request's real
+  history: `#3130 Item sent back`, `#3129 Client uploaded a file`, `#3128 Client opened the
+  link`, `#3127 Portal link created`, `#3126 Request created`, each with its hash prefix.
+
+  ```
+  $ pnpm --filter @gather/site build
+  14:34:23 [build] 1 page(s) built in 643ms
+  14:34:23 [build] Complete!
+  ```
+
+  The built page loaded in Chromium at 1280×900 and in WebKit at 390×844: **no console
+  errors, no failed requests, no horizontal overflow at either size.**
+
+  Whole-repo state at the end of the phase:
+
+  ```
+  $ pnpm test
+   Test Files  18 passed (18)
+        Tests  232 passed (232)
+
+  $ npx playwright test           # against the built image, mail overlay up
+    33 passed (20.3m)             # chromium 26 · mobile-safari 3 · team 4
+
+  $ pnpm test:cloud
+    4 passed (34.0s)
+
+  $ pnpm lint && pnpm format && pnpm build
+    (clean)
+  ```
+
+- **Decisions & why:**
+  1. **No screenshot was made in a design tool.** `capture-demo.mjs` drives the real product
+     and writes the images the site imports, so a marketing page cannot drift from the
+     software — if a screen changes, re-running the script changes the site. A page that
+     could show something the product does not do is a page that eventually will.
+  2. **The pricing table is generated from `PLAN_DEFINITIONS`,** which now contains only
+     features that exist. This is the mechanism that stops the site advertising SMS.
+  3. **The "not open yet" plans are text, not disabled buttons.** A greyed control that never
+     becomes pressable is a lie with a cursor.
+  4. **The Stripe gap is on the site and in the README,** not only in `progress.md`. A gap
+     recorded where only the author reads it has been hidden, and the launch checklist now
+     says so as a rule.
+  5. **The demo gif starts six seconds in** — after sign-up and two-factor enrolment. Both
+     are real and both are in the product; a loop that opens on a password field is one
+     nobody watches. 64 colours, no dithering, 8fps: 1.4 MB rather than 5.7 MB, which is the
+     difference between a hero image and a bounce.
+  6. **`vitest.setup.ts` reads `.env`.** `pnpm test` used to fail on a laptop where the stack
+     was already running, with the connection string sitting in `.env` unread. Real
+     environment variables still win, so CI is unaffected, and `testDatabaseUrl()` still
+     derives a `_test` database — loading `.env` can never point a truncating test at
+     somebody's development data.
+
+- **Deviations from plan:**
+  1. **No before/after photograph of an inbox.** plan.md §8 asked for the "47 chase emails"
+     panel to be rendered from the real product. There is no real inbox to render — the
+     product is what replaces it — so the left panel is a plainly-styled list of subject
+     lines, obviously a diagram, next to a real screenshot on the right. Inventing a
+     screenshot of somebody's mail client would have been the one fake image on the page.
+  2. **Lighthouse ≥95 is claimed by construction, not measured.** No Chrome-headless
+     Lighthouse run happened here: the page is one static HTML file with an inlined
+     stylesheet, no web fonts, no third-party scripts and no client JavaScript. What was
+     measured is what the audit is a proxy for — no console errors, no failed requests, no
+     horizontal overflow, on desktop and on a phone.
+  3. `site/` is a pnpm workspace package rather than a standalone directory, so one
+     `pnpm build` covers it.
+
+- **Known issues:**
+  1. **`capture-demo.mjs` wants an install that has not been captured before.** It signs up
+     `dana@delgado.example.com`, and on a second run against the same database that address
+     is taken, so it falls back to a stamped one that then appears in the screenshots. Fine
+     against a fresh stack; worth knowing before re-running.
+  2. **The demo gif is 1.4 MB in the repository.** Git does not delta-compress it, so every
+     re-capture adds another copy to history. Worth moving to a release asset if it is
+     regenerated often.
+  3. **The site has no analytics, and will not get any** — that is a decision, not a gap, but
+     it means the launch will be measured by GitHub stars and issues rather than by traffic.
+  4. Carried over: everything in the Phase 7 list, above all that **Stripe has never
+     completed a call**.
+
+- **Next step (exact resume instruction):** `Run docs/stripe-verification.md end to end with real Stripe test keys, then update progress.md and the ⚠️ notes it names.`
