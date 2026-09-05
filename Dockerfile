@@ -19,6 +19,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/db/package.json ./packages/db/
+COPY packages/billing/package.json ./packages/billing/
 COPY packages/mail/package.json ./packages/mail/
 COPY packages/reminders/package.json ./packages/reminders/
 COPY packages/storage/package.json ./packages/storage/
@@ -32,6 +33,7 @@ COPY apps ./apps
 # Order matters: each package compiles against the previous one's dist/.
 RUN pnpm --filter @gather/core build \
   && pnpm --filter @gather/db build \
+  && pnpm --filter @gather/billing build \
   && pnpm --filter @gather/mail build \
   && pnpm --filter @gather/storage build \
   && pnpm --filter @gather/reminders build \

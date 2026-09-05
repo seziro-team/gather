@@ -11,7 +11,7 @@ import {
   section,
   stopSchedule,
 } from '@gather/db';
-import type { Actor } from './actor';
+import { requirePermission, type Actor } from './actor';
 import { getTemplate } from './templates';
 
 export type RequestRow = typeof request.$inferSelect;
@@ -91,6 +91,7 @@ export interface CreateRequestInput {
  * halfway cannot leave a request with three of its five sections.
  */
 export async function createRequest(actor: Actor, input: CreateRequestInput): Promise<RequestRow> {
+  requirePermission(actor, 'requests:write');
   const db = getDb();
 
   const owner = await db
@@ -153,6 +154,7 @@ export async function updateRequestDetails(
   id: string,
   input: { title: string; description?: string | null; dueAt?: Date | null },
 ): Promise<RequestRow> {
+  requirePermission(actor, 'requests:write');
   return getDb().transaction(async (tx) => {
     const updated = await tx
       .update(request)
@@ -196,6 +198,7 @@ export async function updateRequestDetails(
  * transition. The transition itself does not change.
  */
 export async function completeRequest(actor: Actor, id: string): Promise<RequestRow> {
+  requirePermission(actor, 'requests:review');
   return getDb().transaction(async (tx) => {
     const rows = await tx
       .select({ id: request.id, status: request.status })
@@ -245,6 +248,7 @@ export async function saveRequestStructure(
   id: string,
   body: TemplateBody,
 ): Promise<void> {
+  requirePermission(actor, 'requests:write');
   await getDb().transaction(async (tx) => {
     const rows = await tx
       .select({ id: request.id, status: request.status })
@@ -276,6 +280,7 @@ export async function saveRequestStructure(
 }
 
 export async function deleteRequest(actor: Actor, id: string): Promise<RequestRow> {
+  requirePermission(actor, 'requests:write');
   const db = getDb();
   const structure = await readRequestStructure(db, id);
 

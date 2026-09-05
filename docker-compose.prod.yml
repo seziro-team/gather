@@ -1,0 +1,127 @@
+# Gather in production, behind real TLS.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# What this overlay changes:
+#   • Caddy terminates TLS on 80/443 and gets a real certificate from Let's Encrypt.
+#   • Nothing else listens on a public port — web and db are reachable only inside the
+#     compose network. The dev stack publishes 3000; this one takes that back.
+#   • GATHER_TRUST_PROXY is on, because now there really is a proxy in front and
+#     X-Forwarded-For is trustworthy. It is off by default everywhere else: believing that
+#     header without a proxy lets any caller forge their own IP past the rate limiter.
+#   • Backups run nightly on their own schedule, into a named volume you can ship offsite.
+#
+# Every hostname is env-driven — nothing here knows what domain you bought. Set them in
+# `.env` next to this file:
+#
+#   GATHER_DOMAIN=gather.example.com
+#   GATHER_APP_URL=https://gather.example.com
+#   ACME_EMAIL=ops@example.com
+#   POSTGRES_PASSWORD=<openssl rand -base64 32>
+#   GATHER_AUTH_SECRET=<openssl rand -base64 48>
+#   GATHER_ENCRYPTION_KEY=<openssl rand -base64 32>   # keep a backup, off this machine
+#
+# For the hosted tier add GATHER_CLOUD=true and the four STRIPE_* variables; the app
+# refuses to boot with billing half-configured, which is deliberate.
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      # Caddy reads these out of the environment, so the Caddyfile has no domain in it.
+      GATHER_DOMAIN: ${GATHER_DOMAIN:?set GATHER_DOMAIN, e.g. gather.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL — Let's Encrypt sends expiry warnings there}
+      GATHER_MAX_UPLOAD_MB: ${GATHER_MAX_UPLOAD_MB:-100}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Losing this volume means re-issuing every
+      # certificate, which Let's Encrypt rate-limits — keep it.
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O-', 'http://127.0.0.1:2019/config/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  web:
+    environment:
+      # There is a proxy now, and it is the only way in.
+      GATHER_TRUST_PROXY: 'true'
+      GATHER_APP_URL: ${GATHER_APP_URL:?set GATHER_APP_URL, e.g. https://gather.example.com}
+      GATHER_CLOUD: ${GATHER_CLOUD:-false}
+      GATHER_ADMIN_EMAILS: ${GATHER_ADMIN_EMAILS:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_CLOUD: ${STRIPE_PRICE_CLOUD:-}
+      STRIPE_PRICE_CLOUD_PRO: ${STRIPE_PRICE_CLOUD_PRO:-}
+    # Reachable through Caddy only. `ports: !override []` replaces the list from the base
+    # file rather than merging with it — without it, 3000 would still be published.
+    ports: !override []
+
+  worker:
+    environment:
+      GATHER_APP_URL: ${GATHER_APP_URL:?set GATHER_APP_URL}
+
+  db:
+    # Same reasoning: the base file publishes 5432 on loopback for host-side tooling.
+    # In production, reach it with `docker compose exec db psql`.
+    ports: !override []
+
+  # Nightly `pg_dump`, kept for a fortnight, into a volume of its own.
+  #
+  # Deliberately plain: a custom-format dump and `find -delete`, no backup product to learn.
+  # It is not offsite — copying gather-backups somewhere else is the operator's job, and
+  # the README says so rather than pretending this is a disaster-recovery plan.
+  backup:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-gather}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-gather}
+      PGDATABASE: ${POSTGRES_DB:-gather}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - gather-backups:/backups
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        echo "backup: nightly pg_dump to /backups, keeping ${BACKUP_KEEP_DAYS:-14} days"
+        while true; do
+          # Sleep until 03:17 local time — off the hour, so it does not collide with
+          # every other cron job on the box.
+          now=$$(date +%s)
+          next=$$(date -d 'today 03:17' +%s 2>/dev/null || date -j -f '%H:%M' '03:17' +%s)
+          [ "$$next" -le "$$now" ] && next=$$((next + 86400))
+          sleep $$((next - now))
+
+          stamp=$$(date +%Y-%m-%dT%H-%M-%S)
+          if pg_dump --format=custom --file="/backups/gather-$$stamp.dump.part"; then
+            mv "/backups/gather-$$stamp.dump.part" "/backups/gather-$$stamp.dump"
+            echo "backup: wrote /backups/gather-$$stamp.dump"
+          else
+            echo "backup: FAILED at $$stamp" >&2
+            rm -f "/backups/gather-$$stamp.dump.part"
+          fi
+
+          find /backups -name 'gather-*.dump' -mtime "+$${BACKUP_KEEP_DAYS:-14}" -delete
+        done
+
+volumes:
+  caddy-data:
+  caddy-config:
+  gather-backups:

@@ -65,8 +65,8 @@ test('owner signs up, enrols TOTP, and signs back in with an authenticator code'
   await expect(page).toHaveURL(/\/dashboard/);
   await expect(page.getByRole('heading', { name: 'Owner & Co Accountants' })).toBeVisible();
 
-  // The audit trail is populated by the flow that just ran, not by seed data.
-  await expect(page.getByRole('heading', { name: 'Audit trail' })).toBeVisible();
+  // The activity list is populated by the flow that just ran, not by seed data.
+  await expect(page.getByRole('heading', { name: 'Recent activity' })).toBeVisible();
   await expect(page.getByText('Firm created')).toBeVisible();
   await expect(page.getByText('Two-factor code verified').first()).toBeVisible();
   // Sign-out is recorded before the session is revoked, so it must be here too.

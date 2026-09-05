@@ -35,14 +35,49 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
+  /*
+   * The antivirus suite is opt-in.
+   *
+   * It needs the ClamAV overlay and ~3 GiB of RAM, so a plain `playwright test` on a
+   * default stack would run it against a scanner that is not there and fail for a reason
+   * that says nothing about the product. `pnpm test:antivirus` sets the flag; CI gives it
+   * its own job with its own stack.
+   */
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
       // The portal suite is a mobile test. Running it here too would prove only that a
       // 1280px window has no horizontal overflow, which is not the claim being made.
-      testIgnore: /portal-mobile\.spec\.ts/,
+      // The portal suite is a mobile test; the antivirus suite needs the opt-in ClamAV
+      // profile and is run by its own script against its own stack.
+      testIgnore: [/portal-mobile\.spec\.ts/, /antivirus\.spec\.ts/, /cloud\.spec\.ts/],
     },
+    /*
+     * The hosted tier is opt-in for the same reason: it needs its own stack, with
+     * GATHER_CLOUD on. Against a self-hosted install these pages are 404s, and
+     * team.spec.ts ④ is the test that asserts that.
+     */
+    ...(process.env.GATHER_TEST_CLOUD === '1'
+      ? [
+          {
+            name: 'cloud',
+            use: { ...devices['Desktop Chrome'] },
+            testMatch: /cloud\.spec\.ts/,
+          },
+        ]
+      : []),
+    ...(process.env.GATHER_TEST_ANTIVIRUS === '1'
+      ? [
+          {
+            name: 'antivirus',
+            use: { ...devices['Desktop Chrome'] },
+            testMatch: /antivirus\.spec\.ts/,
+            // clamd's first scan after a signature reload is not fast.
+            timeout: 300_000,
+          },
+        ]
+      : []),
     {
       name: 'mobile-safari',
       // WebKit, touch, an iOS user agent and a 3× device pixel ratio. The viewport is

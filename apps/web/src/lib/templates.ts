@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, or } from 'drizzle-orm';
 import { countItems, instantiateBody, parseTemplateBody, type TemplateBody } from '@gather/core';
 import { appendAuditEvent, getDb, readRequestStructure, template } from '@gather/db';
-import type { Actor } from './actor';
+import { requirePermission, type Actor } from './actor';
 import { slugify } from './firm';
 
 export type TemplateRow = typeof template.$inferSelect;
@@ -73,6 +73,7 @@ export async function saveRequestAsTemplate(
   requestId: string,
   input: { name: string; description?: string | null },
 ): Promise<TemplateRow> {
+  requirePermission(actor, 'templates:write');
   const db = getDb();
   const structure = await readRequestStructure(db, requestId);
   const body = instantiateBody(structure);
@@ -130,6 +131,7 @@ export async function saveRequestAsTemplate(
 
 /** Built-ins are shared and cannot be deleted by a firm; the `firm_id` filter enforces it. */
 export async function deleteFirmTemplate(actor: Actor, id: string): Promise<TemplateRow> {
+  requirePermission(actor, 'templates:write');
   return getDb().transaction(async (tx) => {
     const deleted = await tx
       .delete(template)

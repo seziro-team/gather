@@ -1,0 +1,28 @@
+# Gather Cloud — the hosted tier, for developing and testing it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+#
+# This turns on the three things the hosted tier adds: plan limits, a billing page, and the
+# operator console at /admin. Everything else is identical to the self-hosted product,
+# which is the point — Gather Cloud is hosting, not a better version.
+#
+# ⚠️ THE STRIPE VALUES BELOW ARE NOT KEYS. They are placeholders shaped like keys, and they
+#    exist so the app will boot with GATHER_CLOUD=true before anybody has a Stripe account.
+#    Everything works except Stripe itself: the billing page renders, limits are enforced,
+#    the console lists firms — and pressing "Subscribe" gets a real authentication error
+#    back from Stripe, because these are not real credentials.
+#
+#    To exercise checkout for real, put actual test-mode values in `.env` (they win over the
+#    defaults here) and follow docs/stripe-verification.md.
+services:
+  web:
+    environment:
+      GATHER_CLOUD: 'true'
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_PLACEHOLDER_no_stripe_account_yet}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_PLACEHOLDER_no_stripe_account_yet}
+      STRIPE_PRICE_CLOUD: ${STRIPE_PRICE_CLOUD:-price_PLACEHOLDER_cloud}
+      STRIPE_PRICE_CLOUD_PRO: ${STRIPE_PRICE_CLOUD_PRO:-price_PLACEHOLDER_cloud_pro}
+      # Whoever operates the service. A leading @ means "anybody at this domain", which is
+      # what makes the cloud suite re-runnable: every run signs up a fresh operator on
+      # seziro.test. On a self-hosted install this is empty and /admin exists for nobody.
+      GATHER_ADMIN_EMAILS: ${GATHER_ADMIN_EMAILS:-@seziro.test}

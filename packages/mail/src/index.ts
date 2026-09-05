@@ -9,9 +9,11 @@ export { ResendMail, type ResendOptions } from './resend.js';
 export { SmtpMail, type SmtpOptions } from './smtp.js';
 
 export {
+  renderInviteEmail,
   renderReminderEmail,
   renderRequestEmail,
   renderTestEmail,
+  type InviteContent,
   type Brand,
   type ReminderContent,
   type RenderedEmail,

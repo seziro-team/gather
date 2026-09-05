@@ -10,7 +10,7 @@ import {
   type ReviewView,
 } from '@gather/db';
 import { getMail, mailConfigured, renderReminderEmail } from '@gather/mail';
-import type { Actor } from './actor';
+import { requirePermission, type Actor } from './actor';
 import { logger } from './logger';
 import { getRequest } from './requests';
 
@@ -33,6 +33,7 @@ export async function approve(
   requestId: string,
   itemId: string,
 ): Promise<ReviewOutcome> {
+  requirePermission(actor, 'requests:review');
   const owned = await getRequest(actor.firmId, requestId);
   if (!owned) return { ok: false, error: 'Request not found.' };
 
@@ -66,6 +67,7 @@ export async function reject(
   itemId: string,
   note: string,
 ): Promise<ReviewOutcome> {
+  requirePermission(actor, 'requests:review');
   const owned = await getRequest(actor.firmId, requestId);
   if (!owned) return { ok: false, error: 'Request not found.' };
 

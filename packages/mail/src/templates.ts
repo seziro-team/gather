@@ -276,3 +276,60 @@ ${appUrl}
 `,
   };
 }
+
+export interface InviteContent {
+  firmName: string;
+  invitedBy: string;
+  role: string;
+  url: string;
+  expiresAt: Date;
+}
+
+/**
+ * "Come and help with the document chasing."
+ *
+ * Deliberately plain, and deliberately says what the recipient is being given access to:
+ * this link leads to a system holding other people's tax documents, and somebody
+ * forwarding it casually should have been told that first.
+ */
+export function renderInviteEmail(content: InviteContent): RenderedEmail {
+  const brand: Brand = { firmName: content.firmName, color: DEFAULT_COLOR, logoUrl: null };
+  const expires = new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'long',
+    timeZone: 'UTC',
+  }).format(content.expiresAt);
+
+  return {
+    subject: `${content.invitedBy} invited you to ${content.firmName} on Gather`,
+    html: frame(
+      brand,
+      `<p style="margin:0 0 12px;font-size:16px;line-height:24px">
+  <strong>${escapeHtml(content.invitedBy)}</strong> has invited you to join
+  <strong>${escapeHtml(content.firmName)}</strong> on Gather, as a
+  ${escapeHtml(content.role)}.
+</p>
+<p style="margin:0;font-size:16px;line-height:24px">
+  Gather is where the firm collects documents from its clients. Joining gives you access to
+  those documents, so please do not forward this invitation to anybody else.
+</p>
+${button(content.url, 'Accept the invitation', DEFAULT_COLOR)}
+<p style="margin:0;font-size:14px;line-height:21px;color:#475569">
+  This invitation stops working on ${escapeHtml(expires)}. If you were not expecting it,
+  ignore it — nothing happens until you accept.
+</p>`,
+      `${content.invitedBy} invited you to ${content.firmName}.`,
+    ),
+    text: `${content.invitedBy} has invited you to join ${content.firmName} on Gather, as a ${content.role}.
+
+Gather is where the firm collects documents from its clients. Joining gives you access to
+those documents, so please do not forward this invitation to anybody else.
+
+Accept it here:
+
+${content.url}
+
+This invitation stops working on ${expires}. If you were not expecting it, ignore it —
+nothing happens until you accept.
+`,
+  };
+}

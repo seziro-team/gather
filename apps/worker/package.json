@@ -9,13 +9,15 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --enable-source-maps dist/main.js",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "retention:purge": "node --enable-source-maps dist/cli/retention-purge.js"
   },
   "dependencies": {
     "@gather/core": "workspace:*",
     "@gather/db": "workspace:*",
     "@gather/mail": "workspace:*",
     "@gather/reminders": "workspace:*",
+    "@gather/storage": "workspace:*",
     "pg-boss": "^12.30.0"
   }
 }

@@ -18,6 +18,7 @@ import {
   readRequestStructure,
   recordFile,
   refreshFileResponseStatus,
+  setScanStatus,
   request,
   setResponseValue,
   stopSchedule,
@@ -25,7 +26,10 @@ import {
   type FileRow,
   type ItemState,
 } from '@gather/db';
+import { getScanner, getStorage, masterKeyFrom, scanStored } from '@gather/storage';
 import type { StoredUpload } from '@gather/storage';
+import { logger } from './logger';
+import { removeStoredObject } from './files';
 import type { PortalContext } from './portal';
 
 /**
@@ -210,6 +214,9 @@ export async function attachPortalUpload(
   const row = await getDb().transaction(async (tx) => {
     const response = await ensureResponse(tx, item.id);
     const inserted = await recordFile(tx, {
+      // `pending` blocks the download until a scanner has looked; `skipped` says plainly
+      // that none is configured. Never `clean` on the strength of nothing having run.
+      scanStatus: getScanner() ? 'pending' : 'skipped',
       id: fileId,
       responseId: response.id,
       responseVersion: response.version,
@@ -303,6 +310,91 @@ export async function removePortalFile(
 
     return { storageDriver: deleted.storageDriver, storageKey: deleted.storageKey };
   });
+}
+
+/**
+ * Scan a stored upload, and act on the answer.
+ *
+ * Runs after the bytes are on the disk, reading them back through the decryptor — so what
+ * is scanned is exactly what is stored, not a copy that passed through this process a
+ * moment ago. The file is `pending` and undownloadable throughout.
+ *
+ * An infected file is **deleted from storage** rather than merely flagged. The row stays,
+ * so the firm sees that a client sent malware and when; the bytes do not, because a
+ * quarantine that keeps a live copy of a virus on the firm's server is a worse answer
+ * than one that does not.
+ *
+ * A scanner that errors leaves the file `pending`: unknown is not clean, and an operator
+ * looking at "not finished being scanned" will go and find out why.
+ */
+export async function scanUpload(
+  portal: PortalContext,
+  fileId: string,
+  storageDriver: string,
+  storageKey: string,
+  stored: StoredUpload,
+): Promise<'clean' | 'infected' | 'skipped' | 'pending'> {
+  const scanner = getScanner();
+  if (!scanner) return 'skipped';
+
+  const verdict = await scanStored(
+    {
+      driver: getStorage(),
+      key: storageKey,
+      encrypted: stored.encrypted,
+      envelope: stored.envelope,
+      masterKey: stored.encrypted ? masterKeyFrom() : null,
+    },
+    scanner,
+  );
+
+  if (verdict.status === 'error') {
+    logger.error('a virus scan could not be completed — the file stays quarantined', {
+      fileId,
+      reason: verdict.reason,
+    });
+    return 'pending';
+  }
+
+  const status = verdict.status;
+  await getDb().transaction(async (tx) => {
+    await setScanStatus(tx, fileId, status);
+
+    if (status === 'infected') {
+      await appendAuditEvent(tx, {
+        action: 'file.quarantined',
+        actorType: 'system',
+        firmId: portal.request.firmId,
+        requestId: portal.request.id,
+        targetType: 'file',
+        targetId: fileId,
+        metadata: {
+          name: stored.filename,
+          sha256: stored.sha256,
+          signature: verdict.signature,
+        },
+        ip: portal.context.ip,
+        ua: portal.context.ua,
+      });
+    }
+  });
+
+  if (status === 'infected') {
+    logger.warn('an uploaded file was quarantined', {
+      fileId,
+      signature: verdict.signature,
+      requestId: portal.request.id,
+    });
+    // The row stays as evidence; the bytes go.
+    await removeStoredObject(storageDriver, storageKey).catch((error: unknown) =>
+      logger.error('could not remove a quarantined file from storage', {
+        fileId,
+        error: (error as Error).message,
+      }),
+    );
+  }
+
+  return status;
 }
 
 export async function itemFileCount(itemId: string): Promise<number> {

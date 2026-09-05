@@ -47,6 +47,14 @@ services:
       GATHER_AUTH_SECRET: ${GATHER_AUTH_SECRET:-}
       GATHER_ALLOW_SIGNUP: ${GATHER_ALLOW_SIGNUP:-first-user-only}
       GATHER_REQUIRE_2FA: ${GATHER_REQUIRE_2FA:-true}
+      GATHER_TRUST_PROXY: ${GATHER_TRUST_PROXY:-false}
+      GATHER_RATE_LIMIT: ${GATHER_RATE_LIMIT:-true}
+      GATHER_AUTH_RATE_LIMIT: ${GATHER_AUTH_RATE_LIMIT:-true}
+      GATHER_RETENTION_DAYS: ${GATHER_RETENTION_DAYS:-0}
+      ANTIVIRUS_DRIVER: ${ANTIVIRUS_DRIVER:-none}
+      CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      CLAMAV_TIMEOUT_MS: ${CLAMAV_TIMEOUT_MS:-120000}
       GATHER_LOG_LEVEL: ${GATHER_LOG_LEVEL:-info}
       GATHER_AUTO_MIGRATE: ${GATHER_AUTO_MIGRATE:-true}
       GATHER_DATA_DIR: /app/data
@@ -80,6 +88,14 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_REQUIRE_VALID_CERT: ${SMTP_REQUIRE_VALID_CERT:-true}
+      # The hosted tier. Off here, and off is the whole product with no limits —
+      # see .env.example. docker-compose.prod.yml is where you would turn it on.
+      GATHER_CLOUD: ${GATHER_CLOUD:-false}
+      GATHER_ADMIN_EMAILS: ${GATHER_ADMIN_EMAILS:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_CLOUD: ${STRIPE_PRICE_CLOUD:-}
+      STRIPE_PRICE_CLOUD_PRO: ${STRIPE_PRICE_CLOUD_PRO:-}
     volumes:
       # Holds the generated signing secret, the file-encryption key, and the local storage
       # driver's uploads. Backing this up is backing up Gather's state, alongside the
@@ -135,6 +151,18 @@ services:
       SMTP_REQUIRE_VALID_CERT: ${SMTP_REQUIRE_VALID_CERT:-true}
       GATHER_REMINDER_SCAN_MINUTES: ${GATHER_REMINDER_SCAN_MINUTES:-1}
       GATHER_REMINDER_BATCH: ${GATHER_REMINDER_BATCH:-50}
+      GATHER_RETENTION_DAYS: ${GATHER_RETENTION_DAYS:-0}
+      # The purge reads and deletes stored objects, so it needs the storage settings too.
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-}
+      STORAGE_ENCRYPTION: ${STORAGE_ENCRYPTION:-on}
+      GATHER_ENCRYPTION_KEY: ${GATHER_ENCRYPTION_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-garage}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
     volumes:
       - gather-data:/app/data
 

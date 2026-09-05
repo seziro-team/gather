@@ -111,3 +111,32 @@ export {
   InvalidTimezone,
   type ZonedParts,
 } from './timezone.js';
+
+export {
+  assertCan,
+  can,
+  canAssignRole,
+  matchesAdminList,
+  permissionsFor,
+  FIRM_ROLES,
+  Forbidden,
+  PERMISSIONS,
+  ROLE_DESCRIPTIONS,
+  ROLE_LABELS,
+  type FirmRole,
+  type Permission,
+} from './permissions.js';
+
+export {
+  checkSeats,
+  checkStorage,
+  effectivePlan,
+  planIncludes,
+  FEATURES,
+  PLAN_DEFINITIONS,
+  PLANS,
+  type Feature,
+  type Plan,
+  type PlanDefinition,
+  type UsageCheck,
+} from './plans.js';

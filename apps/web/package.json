@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "^1.6.25",
+    "@gather/billing": "workspace:*",
     "@gather/core": "workspace:*",
     "@gather/db": "workspace:*",
     "@gather/mail": "workspace:*",

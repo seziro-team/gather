@@ -64,6 +64,14 @@ export const firm = pgTable('firm', {
   logoUrl: text(),
   brandColor: text().notNull().default('#0f766e'),
   timezone: text().notNull().default('UTC'),
+  /**
+   * How long this firm keeps a completed request's files, in days.
+   *
+   * `null` means "use the install's `GATHER_RETENTION_DAYS`", which itself defaults to
+   * never. A per-firm value matters once one install serves many firms — a UK practice and
+   * a US one have different obligations, and a shared setting would make one of them wrong.
+   */
+  retentionDays: integer(),
   createdAt: timestamp(ts).notNull().defaultNow(),
   updatedAt: timestamp(ts).notNull().defaultNow(),
 });
@@ -235,6 +243,15 @@ export const file = pgTable(
     iv: text(),
     tag: text(),
     uploadedAt: timestamp(ts).notNull().defaultNow(),
+    /**
+     * When the bytes were disposed of, if they were.
+     *
+     * The row survives a purge on purpose — the name, size and SHA-256 are the record that
+     * a document existed and what it was, which is what 16 CFR 314.4(c)(6) disposal is
+     * supposed to leave behind. Deleting the row would erase the evidence along with the
+     * document.
+     */
+    purgedAt: timestamp(ts),
     uploadedIp: text(),
   },
   (table) => [index().on(table.responseId), index().on(table.scanStatus)],
@@ -330,5 +347,111 @@ export const reminderLog = pgTable(
     index().on(table.requestId),
     index().on(table.providerMessageId),
     uniqueIndex().on(table.idempotencyKey),
+  ],
+);
+
+/**
+ * Gather's own rate limiting, for everything that is not an auth endpoint.
+ *
+ * In Postgres rather than in memory for the reason plan.md §6 gives: a limit that resets
+ * on restart and is not shared between replicas is not a limit. Postgres is already the
+ * only service Gather requires, and one row per bucket per window is a rounding error
+ * next to the audit log.
+ *
+ * A fixed window, not a token bucket. It is one atomic upsert, it is easy to reason about
+ * when you are the one being limited, and the worst case — twice the limit across a window
+ * boundary — is irrelevant at the scales these limits protect against.
+ */
+export const throttle = pgTable(
+  'throttle',
+  {
+    /** `<scope>:<subject>`, e.g. `portal.upload:9f3c…` or `portal.open:203.0.113.7`. */
+    bucket: text().primaryKey(),
+    windowStartedAt: timestamp(ts).notNull(),
+    hits: integer().notNull().default(0),
+  },
+  // Swept by the retention job; the index makes that a range scan rather than a seq scan.
+  (table) => [index().on(table.windowStartedAt)],
+);
+
+/** Cloud plans. `self_hosted` is what every install is unless billing says otherwise. */
+export const firmPlan = pgEnum('firm_plan', ['self_hosted', 'cloud', 'cloud_pro']);
+
+/**
+ * Subscription state, mirrored from Stripe.
+ *
+ * `unpaid` and `past_due` are separate on purpose: Stripe distinguishes "the last payment
+ * failed and we are retrying" from "we have given up", and a firm in the first state
+ * should keep working while a card gets fixed.
+ */
+export const subscriptionStatus = pgEnum('subscription_status', [
+  'none',
+  'trialing',
+  'active',
+  'past_due',
+  'unpaid',
+  'canceled',
+]);
+
+/**
+ * A firm's subscription, as far as Gather knows it.
+ *
+ * **Stripe is the source of truth; this is a cache.** Every field here is written by a
+ * webhook, never by the checkout redirect — a client that never comes back from Stripe
+ * must not leave a firm unsubscribed, and one that fakes the redirect must not leave them
+ * subscribed. One row per firm, absent on a self-hosted install.
+ */
+export const subscription = pgTable(
+  'subscription',
+  {
+    firmId: uuid()
+      .primaryKey()
+      .references(() => firm.id, { onDelete: 'cascade' }),
+    plan: firmPlan().notNull().default('self_hosted'),
+    status: subscriptionStatus().notNull().default('none'),
+    stripeCustomerId: text(),
+    stripeSubscriptionId: text(),
+    /** When the paid period ends — what "cancelled but paid until March" means. */
+    currentPeriodEnd: timestamp(ts),
+    cancelAtPeriodEnd: boolean().notNull().default(false),
+    /** Seats and storage the plan allows, denormalised so gating is one read. */
+    seatLimit: integer(),
+    storageLimitBytes: bigint({ mode: 'number' }),
+    createdAt: timestamp(ts).notNull().defaultNow(),
+    updatedAt: timestamp(ts).notNull().defaultNow(),
+  },
+  (table) => [index().on(table.stripeCustomerId), index().on(table.stripeSubscriptionId)],
+);
+
+/**
+ * An invitation to join a firm.
+ *
+ * Same shape as a portal link and for the same reasons: 32 bytes of CSPRNG stored only as
+ * SHA-256, per-invite expiry, revocable, and every use recorded. The difference is that
+ * accepting one creates an account rather than a scoped session.
+ */
+export const firmInvite = pgTable(
+  'firm_invite',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    firmId: uuid()
+      .notNull()
+      .references(() => firm.id, { onDelete: 'cascade' }),
+    email: text().notNull(),
+    role: firmRole().notNull().default('member'),
+    tokenHash: varchar({ length: 64 }).notNull().unique(),
+    invitedBy: text().references(() => user.id, { onDelete: 'set null' }),
+    expiresAt: timestamp(ts).notNull(),
+    acceptedAt: timestamp(ts),
+    acceptedBy: text().references(() => user.id, { onDelete: 'set null' }),
+    revokedAt: timestamp(ts),
+    createdAt: timestamp(ts).notNull().defaultNow(),
+  },
+  (table) => [
+    index().on(table.firmId),
+    // One live invitation per address per firm; re-inviting replaces rather than stacks.
+    uniqueIndex('firm_invite_pending')
+      .on(table.firmId, table.email)
+      .where(sql`${table.acceptedAt} is null and ${table.revokedAt} is null`),
   ],
 );

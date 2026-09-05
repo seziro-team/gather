@@ -1,0 +1,49 @@
+# TLS and the front door. Used by docker-compose.prod.yml.
+#
+# No domain appears in this file — {$GATHER_DOMAIN} comes from the environment, because
+# which domain Gather runs on is a deployment decision and this repo is public.
+
+{
+	email {$ACME_EMAIL}
+	# Caddy asks Let's Encrypt for a certificate on first request and renews it itself.
+	# Point the DNS at this machine, open 80 and 443, and there is nothing else to do.
+	admin :2019
+}
+
+{$GATHER_DOMAIN} {
+	encode zstd gzip
+
+	# Uploads go through here. Caddy buffers request bodies to disk above 8MB by default,
+	# which is fine — but it must not refuse a file the app would have accepted, so the
+	# limit is the app's own, plus a little for multipart framing.
+	request_body {
+		max_size {$GATHER_MAX_UPLOAD_MB:100}MB
+	}
+
+	# HSTS. The app sets its own security headers per response — including a per-request
+	# CSP nonce that a proxy cannot generate — so this adds the one header that is only
+	# meaningful at the TLS edge, and leaves the rest alone.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# Caddy advertises itself by default; a version number in a header is free
+		# reconnaissance.
+		-Server
+	}
+
+	reverse_proxy web:3000 {
+		# Long enough for a large zip export of a whole request to stream out.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+		# The app only believes these when GATHER_TRUST_PROXY is on, which the prod
+		# overlay sets — and which is exactly when they are actually trustworthy.
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -12,7 +12,7 @@ import {
 } from '@gather/db';
 import { getMail, mailConfigured } from '@gather/mail';
 import { sendManualReminder } from '@gather/reminders';
-import type { Actor } from './actor';
+import { requirePermission, type Actor } from './actor';
 import { logger } from './logger';
 
 /**
@@ -100,6 +100,8 @@ export async function saveSchedule(
   cadence: Cadence,
   active: boolean,
 ): Promise<{ nextRunAt: Date | null }> {
+  requirePermission(actor, 'reminders:manage');
+
   const target = await findReminderTarget(getDb(), requestId, actor.firmId);
   if (!target) throw new Error('Request not found.');
 
@@ -134,6 +136,8 @@ export async function sendReminderNow(
   actor: Actor,
   requestId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  requirePermission(actor, 'reminders:manage');
+
   if (!mailConfigured()) {
     return {
       ok: false,

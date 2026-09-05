@@ -16,7 +16,7 @@ import {
   type LinkRejection,
   type LinkSummary,
 } from '@gather/db';
-import type { Actor } from './actor';
+import { requirePermission, type Actor } from './actor';
 import { requestContext, type RequestContext } from './request-context';
 
 /**
@@ -175,6 +175,7 @@ export interface IssuedPortalLink {
  * is what "sending" a request means until Phase 4 puts an email around it.
  */
 export async function issuePortalLink(actor: Actor, requestId: string): Promise<IssuedPortalLink> {
+  requirePermission(actor, 'requests:write');
   const config = env();
   const expiresAt = new Date(Date.now() + config.GATHER_PORTAL_LINK_DAYS * 86_400_000);
 
@@ -235,6 +236,7 @@ export async function revokePortalLink(
   requestId: string,
   tokenId: string,
 ): Promise<void> {
+  requirePermission(actor, 'requests:write');
   await getDb().transaction(async (tx) => {
     const owned = await tx
       .select({ id: request.id })

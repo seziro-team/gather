@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { ActionForm } from '@/components/action-form';
 import { Card, Field, Input } from '@/components/ui';
 import { isSignupAllowed } from '@/lib/auth';
+import { safeNext } from '@/lib/next-path';
 import { getSessionUser } from '@/lib/session';
 import { signInAction } from '../actions';
 
@@ -10,8 +11,15 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Sign in · Gather' };
 
-export default async function SignInPage() {
-  if (await getSessionUser()) redirect('/dashboard');
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  // `next` survives the round trip so an invitation link still works for somebody who
+  // already has an account: they sign in, and land back on /join/<token>.
+  const next = safeNext((await searchParams).next);
+  if (await getSessionUser()) redirect(next);
   const canSignUp = await isSignupAllowed();
 
   return (
@@ -22,6 +30,7 @@ export default async function SignInPage() {
       </p>
 
       <ActionForm action={signInAction} submitLabel="Sign in" pendingLabel="Signing in…">
+        <input type="hidden" name="next" value={next} />
         <Field label="Email">
           <Input name="email" type="email" autoComplete="username" required autoFocus />
         </Field>

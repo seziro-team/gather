@@ -12,12 +12,15 @@ import {
   UploadRejected,
   UploadTooLarge,
 } from '@gather/storage';
+import { checkUploadFits } from '@/lib/cloud';
 import { currentPortal } from '@/lib/portal';
+import { limit, tooManyRequests } from '@/lib/throttle';
 import {
   attachPortalUpload,
   itemFileCount,
   PortalItemNotFound,
   requirePortalItem,
+  scanUpload,
 } from '@/lib/portal-data';
 
 /**
@@ -56,6 +59,12 @@ export async function POST(
     return fail(409, 'This request is closed, so it cannot take any more files.');
   }
 
+  // Per session rather than per IP: an office behind one NAT is one address and many
+  // clients, and limiting them as one person breaks the product for the people least able
+  // to work around it.
+  const limited = await limit('portal.upload', portal.sessionId);
+  if (!limited.ok) return tooManyRequests(limited, 'portal.upload');
+
   const itemId = request.nextUrl.searchParams.get('item') ?? '';
   let item;
   try {
@@ -79,6 +88,11 @@ export async function POST(
   if (Number.isFinite(declared) && declared > maxBytes) {
     return fail(413, `That file is larger than the ${config.GATHER_MAX_UPLOAD_MB} MB limit.`);
   }
+
+  // The firm's plan, on the hosted tier only. Returns without a query on a self-hosted
+  // install, where there is no limit to be against.
+  const room = await checkUploadFits(portal.firm.id, Number.isFinite(declared) ? declared : 0);
+  if (!room.allowed) return fail(507, room.reason);
 
   const rawName = request.headers.get('x-gather-filename');
   if (!rawName) return fail(400, 'That upload arrived without a filename.');
@@ -113,13 +127,27 @@ export async function POST(
     throw error;
   }
 
+  let attached;
   try {
-    const attached = await attachPortalUpload(portal, item, fileId, driver.name, key, stored);
-    return Response.json({ file: attached.view }, { status: 201 });
+    attached = await attachPortalUpload(portal, item, fileId, driver.name, key, stored);
   } catch (error) {
     // An object with no row is unreachable and would never be cleaned up. Better to lose
     // the upload and tell the client to try again than to leak bytes into the bucket.
     await driver.remove(key).catch(() => undefined);
     throw error;
   }
+
+  // Scanned inline, after the bytes are stored and while the row says `pending` — so the
+  // file is undownloadable throughout, and the client is told what happened rather than
+  // finding out later that their document vanished.
+  const scan = await scanUpload(portal, fileId, driver.name, key, stored);
+  if (scan === 'infected') {
+    return fail(
+      422,
+      'That file contains malware, so it has not been kept. If this is unexpected, ' +
+        'check the device you sent it from.',
+    );
+  }
+
+  return Response.json({ file: { ...attached.view, scanStatus: scan } }, { status: 201 });
 }

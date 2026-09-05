@@ -109,6 +109,74 @@ const envSchema = z
     SMTP_PASSWORD: optionalText,
     SMTP_REQUIRE_VALID_CERT: booleanish.default(true),
 
+    // ── Antivirus ────────────────────────────────────────────────────────────
+    /**
+     * `none` is the default, and the honest one.
+     *
+     * ClamAV wants 3–4 GiB of RAM — more than the rest of Gather combined — so turning it
+     * on by default would break the cheap-VPS promise in plan.md §5. With it off, files
+     * are marked `skipped` and the UI says "Not scanned"; they are never silently treated
+     * as clean.
+     */
+    ANTIVIRUS_DRIVER: z.enum(['none', 'clamav']).default('none'),
+    CLAMAV_HOST: z.string().trim().min(1).default('clamav'),
+    CLAMAV_PORT: z.coerce.number().int().positive().max(65535).default(3310),
+    /** A 100 MB scan is not instant, and a timeout that fires mid-scan quarantines a file. */
+    CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(120_000),
+
+    // ── Security ─────────────────────────────────────────────────────────────
+    /**
+     * Trust `X-Forwarded-For` for the client address.
+     *
+     * Off by default, and that is deliberate. With it on and no proxy in front, anyone can
+     * set the header and choose which rate-limit bucket they land in — so this must only
+     * be turned on when something you control is actually terminating the connection.
+     */
+    GATHER_TRUST_PROXY: booleanish.default(false),
+    /** Rate limiting. Off only for a load test you are running yourself. */
+    GATHER_RATE_LIMIT: booleanish.default(true),
+    /**
+     * Rate limiting on the authentication endpoints specifically.
+     *
+     * Separate from `GATHER_RATE_LIMIT` because the numbers are much tighter — three
+     * sign-ups per five minutes, five sign-in attempts a minute — and because those
+     * numbers are correct for an install on the internet and wrong for a test stack where
+     * every test creates an account.
+     *
+     * ⚠️ Never turn this off on an install anyone else can reach. It is the only thing
+     * standing between a password and an unlimited number of guesses.
+     */
+    GATHER_AUTH_RATE_LIMIT: booleanish.default(true),
+    /**
+     * How long a completed request's files are kept before `pnpm retention:purge` will
+     * remove them. `0` means never purge, which is the default: deleting a firm's client
+     * documents on a timer they did not set is not a decision Gather gets to make.
+     */
+    GATHER_RETENTION_DAYS: z.coerce.number().int().min(0).max(36_500).default(0),
+
+    // ── Gather Cloud ─────────────────────────────────────────────────────────
+    /**
+     * Turns on the hosted tier: billing pages, plan limits, the admin panel.
+     *
+     * Off on every self-hosted install, and off is not a lesser mode — a firm with no
+     * subscription row is on `self_hosted`, which has no limits at all. See
+     * packages/core/src/plans.ts for why that is `null` rather than a large number.
+     */
+    GATHER_CLOUD: booleanish.default(false),
+    /** Test-mode keys (`sk_test_…`) until the operator flips them. */
+    STRIPE_SECRET_KEY: optionalText,
+    STRIPE_WEBHOOK_SECRET: optionalText,
+    STRIPE_PRICE_CLOUD: optionalText,
+    STRIPE_PRICE_CLOUD_PRO: optionalText,
+    /**
+     * Addresses allowed into the Seziro admin panel, comma-separated.
+     *
+     * Empty means nobody, which is what a self-hosted install wants: the panel is for
+     * whoever runs the hosted tier, and an install that is not the hosted tier should not
+     * have one at all.
+     */
+    GATHER_ADMIN_EMAILS: optionalText,
+
     // ── Worker ───────────────────────────────────────────────────────────────
     /**
      * How often the worker looks for schedules that have come due, in minutes.
@@ -178,6 +246,29 @@ const envSchema = z
         path: ['SMTP_HOST'],
         message: 'is required when MAIL_DRIVER=smtp.',
       });
+    }
+  })
+  .superRefine((value, ctx) => {
+    if (!value.GATHER_CLOUD) return;
+
+    // A hosted tier with billing half-configured is worse than one with none: the plan
+    // pages appear, the buttons are there, and the first person to press one gets an error
+    // on a payment screen. Refuse to boot instead.
+    const required = {
+      STRIPE_SECRET_KEY: 'https://dashboard.stripe.com/test/apikeys',
+      STRIPE_WEBHOOK_SECRET: 'https://dashboard.stripe.com/test/webhooks',
+      STRIPE_PRICE_CLOUD: 'the price id of the Gather Cloud product',
+      STRIPE_PRICE_CLOUD_PRO: 'the price id of the Gather Cloud Pro product',
+    } as const;
+
+    for (const [key, where] of Object.entries(required)) {
+      if (!value[key as keyof typeof required]) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `is required when GATHER_CLOUD=true — get it from ${where}.`,
+        });
+      }
     }
   });
 
