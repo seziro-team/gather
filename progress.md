@@ -1490,10 +1490,13 @@ Entry template:
   4. **The Stripe gap is on the site and in the README,** not only in `progress.md`. A gap
      recorded where only the author reads it has been hidden, and the launch checklist now
      says so as a rule.
-  5. **The demo gif starts six seconds in** — after sign-up and two-factor enrolment. Both
-     are real and both are in the product; a loop that opens on a password field is one
-     nobody watches. 64 colours, no dithering, 8fps: 1.4 MB rather than 5.7 MB, which is the
-     difference between a hero image and a bounce.
+  5. **The demo gif is the review, not the tour.** Six seconds: a dashboard with one request
+     waiting, then the firm going through it and sending one document back with a note. That
+     is the mechanic the product turns on, and it fits. The window is measured off the wall
+     clock during the capture rather than hard-coded, because a fixed offset silently drifts
+     every time a step is added above it — which is exactly how the loop ended up opening on
+     a sign-up form. 6fps, 720px, 48 colours, no dithering: **619 KB rather than 10 MB**, and
+     the dither pattern was almost all of the difference.
   6. **`vitest.setup.ts` reads `.env`.** `pnpm test` used to fail on a laptop where the stack
      was already running, with the connection string sitting in `.env` unread. Real
      environment variables still win, so CI is unaffected, and `testDatabaseUrl()` still

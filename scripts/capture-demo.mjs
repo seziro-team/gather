@@ -148,6 +148,7 @@ async function main() {
 
   // The firm's browser: a 1280×800 desktop, recorded, because the demo loop is the firm's
   // side and the phone side stitched together.
+  const recordingStartedAt = Date.now();
   const firmContext = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 2,
@@ -228,6 +229,15 @@ async function main() {
   await firm.waitForTimeout(600);
   await shot(firm, 'dashboard');
 
+  // ── The demo loop ─────────────────────────────────────────────────────────
+  // The recording runs for the whole session, but the gif is only this: the firm going
+  // through what came back and sending one item back with a note. That is the mechanic the
+  // product turns on, it fits in a few seconds, and a loop of somebody filling in a sign-up
+  // form is a loop nobody watches. The window is measured off the wall clock rather than
+  // hard-coded, so adding a step above it cannot silently shift the gif onto a password
+  // field — which is exactly what happened when it was a fixed number.
+  const demoStartedAt = Date.now();
+
   step('the firm reviewing, and sending one item back with a note');
   await firm.goto(`${BASE}/requests/${requestId}`);
   await frame(firm, 'Review');
@@ -246,6 +256,10 @@ async function main() {
     await firm.waitForTimeout(1200);
     await shot(firm, 'rejected');
   }
+
+  const demoEndedAt = Date.now();
+  const trimSeconds = Math.max(0, (demoStartedAt - recordingStartedAt) / 1000 - 1);
+  const demoSeconds = Math.min(30, (demoEndedAt - demoStartedAt) / 1000 + 2);
 
   step('what the client sees when an item comes back');
   await phone.reload();
@@ -267,29 +281,37 @@ async function main() {
     step('converting the recording to a gif');
     const source = join(VIDEO, recording);
     // Two passes: build a palette from the whole clip, then map to it. One pass gives a
-    // 256-colour guess per frame and a demo that shimmers. 8fps at 800px keeps the file
-    // small enough to live in the repository and load on a phone — a 6 MB hero image is a
-    // marketing page that loses the visitor before it finishes.
+    // 256-colour guess per frame and a demo that shimmers.
+    //
+    // 6fps at 720px, 48 colours, no dithering. This is flat UI, so a small palette costs
+    // nothing and the dither pattern is what makes a GIF of a webpage enormous — the
+    // difference between roughly 1 MB and roughly 10 MB, which is the difference between a
+    // hero image and a visitor who has already left.
     const palette = join(VIDEO, 'palette.png');
+    const filters = 'fps=6,scale=720:-1:flags=lanczos';
+    const window = ['-ss', trimSeconds.toFixed(1), '-t', demoSeconds.toFixed(1)];
+
     execFileSync('ffmpeg', [
       '-y',
+      ...window,
       '-i',
       source,
       '-vf',
-      'fps=10,scale=960:-1:flags=lanczos,palettegen=stats_mode=diff',
+      `${filters},palettegen=max_colors=48:stats_mode=diff`,
       palette,
     ]);
     execFileSync('ffmpeg', [
       '-y',
+      ...window,
       '-i',
       source,
       '-i',
       palette,
       '-lavfi',
-      'fps=10,scale=960:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer',
+      `${filters}[x];[x][1:v]paletteuse=dither=none`,
       join(PUBLIC, 'demo.gif'),
     ]);
-    step(`demo.gif written (${recording})`);
+    step(`demo.gif written — ${demoSeconds.toFixed(1)}s from ${trimSeconds.toFixed(1)}s in`);
   } else {
     console.warn('! no recording found — skipping the gif');
   }

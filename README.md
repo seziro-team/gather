@@ -10,7 +10,7 @@ you say it's done, not the client assuming it is.
 Free and self-hosted is the whole product, not a demo. There is no cap on requests,
 clients, seats or storage — only the disk you already pay for.
 
-![Gather: building a request from a template, issuing a client link with no account, and reviewing what came back item by item](site/public/demo.gif)
+![Gather: the dashboard showing one request waiting, then the firm reviewing what the client sent and returning one document with a note](site/public/demo.gif)
 
 _Recorded from a running install by `node scripts/capture-demo.mjs` — a real firm, a real
 client, a real IRS W-9 through the real portal. Every screenshot in this repository and on
