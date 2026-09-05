@@ -110,7 +110,13 @@ export async function readPortalView(requestId: string): Promise<PortalView> {
       const state = states.get(item.id);
       const files = (state?.files ?? []).map(toFileView);
       const value = (state?.value ?? null) as ResponseValue;
-      const done = isAnswered(item, value, files.length);
+      const status = state?.status ?? 'pending';
+
+      // The firm's decision outranks what is attached. An approved item is done whatever
+      // is in it, and a **rejected** one is outstanding again even though the file the
+      // firm sent back is still there — which is the whole point of sending it back.
+      const done =
+        status === 'approved' || (status !== 'rejected' && isAnswered(item, value, files.length));
 
       total += 1;
       if (done) answered += 1;
@@ -122,7 +128,7 @@ export async function readPortalView(requestId: string): Promise<PortalView> {
       return {
         item,
         value,
-        status: state?.status ?? 'pending',
+        status,
         rejectNote: state?.rejectNote ?? null,
         files,
         answered: done,

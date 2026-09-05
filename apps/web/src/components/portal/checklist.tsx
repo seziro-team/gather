@@ -21,17 +21,34 @@ const AUTOSAVE_MS = 700;
 type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 interface ItemStateMap {
-  [itemId: string]: { value: ResponseValue; files: PortalFileView[] };
+  [itemId: string]: { value: ResponseValue; files: PortalFileView[]; status: string };
 }
 
 function initialState(view: PortalView): ItemStateMap {
   const state: ItemStateMap = {};
   for (const section of view.sections) {
     for (const entry of section.items) {
-      state[entry.item.id] = { value: entry.value, files: entry.files };
+      state[entry.item.id] = { value: entry.value, files: entry.files, status: entry.status };
     }
   }
   return state;
+}
+
+/**
+ * Whether an item counts towards the progress bar.
+ *
+ * The firm's decision outranks what is attached: an approved item is done whatever is in
+ * it, and a rejected one is outstanding again even though the file the firm sent back is
+ * still sitting there. Without this, sending an item back would leave the client looking
+ * at "5 of 5 done" and no reason to come back.
+ */
+function itemIsDone(
+  item: TemplateItem & { id: string },
+  entry: { value: ResponseValue; files: PortalFileView[]; status: string },
+): boolean {
+  if (entry.status === 'approved') return true;
+  if (entry.status === 'rejected') return false;
+  return isAnswered(item, entry.value, entry.files.length);
 }
 
 const inputClasses =
@@ -90,10 +107,20 @@ export function PortalChecklist({
 
   const change = useCallback(
     (itemId: string, value: ResponseValue, immediate: boolean) => {
-      setState((current) => ({
-        ...current,
-        [itemId]: { value, files: current[itemId]?.files ?? [] },
-      }));
+      setState((current) => {
+        const existing = current[itemId];
+        return {
+          ...current,
+          [itemId]: {
+            value,
+            files: existing?.files ?? [],
+            // Answering a rejected item makes it outstanding no longer, the moment it is
+            // typed — the server sets the same status when the autosave lands, and
+            // waiting for that would make the progress bar lag a whole debounce behind.
+            status: existing?.status === 'approved' ? 'approved' : 'submitted',
+          },
+        };
+      });
       queued.current.set(itemId, value);
 
       const existing = timers.current.get(itemId);
@@ -132,10 +159,17 @@ export function PortalChecklist({
   }, [flush]);
 
   const setFiles = useCallback((itemId: string, files: PortalFileView[]) => {
-    setState((current) => ({
-      ...current,
-      [itemId]: { value: current[itemId]?.value ?? null, files },
-    }));
+    setState((current) => {
+      const existing = current[itemId];
+      return {
+        ...current,
+        [itemId]: {
+          value: existing?.value ?? null,
+          files,
+          status: existing?.status === 'approved' ? 'approved' : 'submitted',
+        },
+      };
+    });
   }, []);
 
   const progress = useMemo(() => {
@@ -145,8 +179,12 @@ export function PortalChecklist({
     let total = 0;
     for (const section of view.sections) {
       for (const entry of section.items) {
-        const current = state[entry.item.id];
-        const done = isAnswered(entry.item, current?.value ?? null, current?.files.length ?? 0);
+        const current = state[entry.item.id] ?? {
+          value: entry.value,
+          files: entry.files,
+          status: entry.status,
+        };
+        const done = itemIsDone(entry.item, current);
         total += 1;
         if (done) answered += 1;
         if (entry.item.required) {
@@ -185,7 +223,11 @@ export function PortalChecklist({
 
           <div className="mt-4 space-y-4">
             {section.items.map((entry) => {
-              const current = state[entry.item.id] ?? { value: null, files: [] };
+              const current = state[entry.item.id] ?? {
+                value: null,
+                files: [],
+                status: entry.status,
+              };
               return (
                 <ItemCard
                   key={entry.item.id}
@@ -193,6 +235,7 @@ export function PortalChecklist({
                   item={entry.item}
                   value={current.value}
                   files={current.files}
+                  status={current.status}
                   rejectNote={entry.rejectNote}
                   save={saveState[entry.item.id] ?? 'idle'}
                   error={errors[entry.item.id]}
@@ -286,6 +329,7 @@ function ItemCard({
   item,
   value,
   files,
+  status,
   rejectNote,
   save,
   error,
@@ -297,6 +341,7 @@ function ItemCard({
   item: TemplateItem & { id: string };
   value: ResponseValue;
   files: PortalFileView[];
+  status: string;
   rejectNote: string | null;
   save: SaveState;
   error?: string;
@@ -304,12 +349,17 @@ function ItemCard({
   onValue: (itemId: string, value: ResponseValue, immediate: boolean) => void;
   onFiles: (itemId: string, files: PortalFileView[]) => void;
 }) {
-  const done = isAnswered(item, value, files.length);
+  const approved = status === 'approved';
+  // An item the firm has accepted is finished. Leaving it editable invites a client to
+  // "improve" a document that has already been filed, and the firm would never know.
+  const locked = readOnly || approved;
+  const done = itemIsDone(item, { value, files, status });
 
   return (
     <div
       data-testid="portal-item"
       data-answered={done ? 'yes' : 'no'}
+      data-status={status}
       className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5"
     >
       <div className="mb-1 flex items-start justify-between gap-3">
@@ -323,10 +373,13 @@ function ItemCard({
         </p>
         {done ? (
           <span
-            aria-hidden
-            className="mt-0.5 shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200 ring-inset"
+            className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${
+              approved
+                ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+                : 'bg-slate-100 text-slate-700 ring-slate-200'
+            }`}
           >
-            Done
+            {approved ? 'Approved' : 'Done'}
           </span>
         ) : null}
       </div>
@@ -349,11 +402,18 @@ function ItemCard({
           maxFiles={item.config.maxFiles}
           files={files}
           onChange={(next) => onFiles(item.id, next)}
-          disabled={readOnly}
+          disabled={locked}
         />
       ) : (
-        <AnswerControl item={item} value={value} readOnly={readOnly} onValue={onValue} />
+        <AnswerControl item={item} value={value} readOnly={locked} onValue={onValue} />
       )}
+
+      {approved ? (
+        <p className="mt-2 text-xs text-slate-500">
+          Your accountant has accepted this, so it is closed. Get in touch with them if something
+          needs to change.
+        </p>
+      ) : null}
 
       <div className="mt-2 flex items-center justify-between gap-3">
         {error ? (

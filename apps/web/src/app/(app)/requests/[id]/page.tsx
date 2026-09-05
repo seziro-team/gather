@@ -3,11 +3,15 @@ import { notFound } from 'next/navigation';
 import { and, desc, eq } from 'drizzle-orm';
 import { auditEvent, getDb } from '@gather/db';
 import { RequestChecklist } from '@/components/request-checklist';
+import { ReviewPanel } from '@/components/review-panel';
+import { ACTION_LABELS } from '@/lib/audit-labels';
 import { formatDueDate } from '@/lib/format';
+import { describeValue } from '@gather/core';
 import { Alert, Badge, Button, Card, linkButton, PageHeader } from '@/components/ui';
 import { listPortalLinks } from '@/lib/portal';
 import { readPortalView } from '@/lib/portal-data';
 import { readRemindersView } from '@/lib/reminders';
+import { readReview } from '@/lib/review';
 import { getRequest } from '@/lib/requests';
 import { requireReadyUser } from '@/lib/session';
 import { deleteRequestAction } from '../actions';
@@ -18,20 +22,6 @@ import { PortalLinks } from './share-forms';
 export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Request · Gather' };
-
-const ACTION_LABELS: Record<string, string> = {
-  'request.created': 'Request created',
-  'request.updated': 'Details changed',
-  'request.structure_updated': 'Checklist changed',
-  'template.created': 'Saved as a template',
-  'request.link_issued': 'Portal link created',
-  'request.link_revoked': 'Portal link revoked',
-  'portal.opened': 'Client opened the link',
-  'portal.file_uploaded': 'Client uploaded a file',
-  'portal.file_removed': 'Client removed a file',
-  'portal.submitted': 'Client sent it back',
-  'portal.link_rejected': 'A dead link was tried',
-};
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
@@ -49,10 +39,11 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   if (!found) notFound();
 
   const db = getDb();
-  const [view, links, reminders, events] = await Promise.all([
+  const [view, links, reminders, review, events] = await Promise.all([
     readPortalView(id),
     listPortalLinks(id),
     readRemindersView(id),
+    readReview(id),
     db
       .select()
       .from(auditEvent)
@@ -153,8 +144,53 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
       )}
 
       <Card>
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">Checklist</h2>
-        <RequestChecklist requestId={id} view={view} />
+        {found.request.status === 'draft' ? (
+          <>
+            <h2 className="mb-4 text-lg font-semibold text-slate-900">Checklist</h2>
+            <RequestChecklist requestId={id} view={view} />
+          </>
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-lg font-semibold text-slate-900">Review</h2>
+              <span className="text-sm text-slate-600" data-testid="review-progress">
+                {review.approved} of {review.total} approved
+                {review.awaitingReview > 0 ? ` · ${review.awaitingReview} waiting on you` : ''}
+              </span>
+            </div>
+            <ReviewPanel
+              requestId={id}
+              closed={found.request.status === 'archived'}
+              sections={review.sections.map((section) => ({
+                id: section.id,
+                title: section.title,
+                items: section.items.map((entry) => ({
+                  id: entry.item.id,
+                  label: entry.item.label,
+                  helpText: entry.item.helpText ?? null,
+                  type: entry.item.type,
+                  required: entry.item.required,
+                  sectionTitle: entry.sectionTitle,
+                  status: entry.status,
+                  rejectNote: entry.rejectNote,
+                  version: entry.version,
+                  answer:
+                    entry.item.type === 'file' ? null : describeValue(entry.item, entry.value),
+                  files: entry.files.map(({ file, current }) => ({
+                    id: file.id,
+                    name: file.originalName,
+                    size: file.size,
+                    sha256: file.sha256,
+                    uploadedAt: file.uploadedAt.toISOString(),
+                    scanStatus: file.scanStatus,
+                    current,
+                    version: file.responseVersion,
+                  })),
+                })),
+              }))}
+            />
+          </>
+        )}
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -177,6 +213,40 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
           <SaveAsTemplateForm id={id} defaultName={found.request.title} />
         </Card>
       </div>
+
+      {found.request.status === 'draft' ? null : (
+        <Card>
+          <h2 className="text-lg font-semibold text-slate-900">Take a copy</h2>
+          <p className="mt-1 mb-4 text-sm text-slate-600">
+            The zip is foldered by section and item, with a manifest listing the SHA-256 of every
+            file as it was recorded on arrival — so you can show later that what you handed on is
+            what the client sent. The audit trail is a CSV that verifies itself.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={`/requests/${id}/download`}
+              className={linkButton()}
+              data-testid="download-zip"
+            >
+              Download all files
+            </a>
+            <a
+              href={`/requests/${id}/download?include=all`}
+              className={linkButton('secondary')}
+              data-testid="download-zip-all"
+            >
+              Include replaced versions
+            </a>
+            <a
+              href={`/requests/${id}/audit.csv`}
+              className={linkButton('secondary')}
+              data-testid="download-audit"
+            >
+              Audit trail (CSV)
+            </a>
+          </div>
+        </Card>
+      )}
 
       <Card>
         <h2 className="mb-4 text-lg font-semibold text-slate-900">History</h2>

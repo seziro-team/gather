@@ -840,3 +840,198 @@ Entry template:
      still must not be merged.
 
 - **Next step (exact resume instruction):** `Start Phase 5: Approve/reject, dashboard, zip, audit export — per plan.md §9.`
+
+---
+
+## 2026-09-05 — Phase 5: Approve/reject, dashboard, zip, audit export
+
+- **Shipped:**
+  - **Per-item approve/reject**, which is the mechanic the whole product turns on. Nothing
+    infers approval from a file existing; "complete" is the firm saying so, item by item.
+    Rejection requires a note, because "rejected" with no explanation is how a client sends
+    the same wrong document three times.
+  - **Response versioning.** Rejecting bumps `response.version`, so a resubmission is a new
+    answer rather than an edit of the old one — files carry the version they were uploaded
+    against, and the superseded copy is retained and still attributable.
+  - **Approving the last required item completes the request and stops its reminders, in
+    one transaction.** There is no window in which a finished request is still chasing.
+  - **A keyboard review flow** — `j`/`k` to move, `a` to approve, `r` to send back, `⌘↵` to
+    confirm, `esc` to cancel — for the person doing this forty times in January.
+  - **The client's side of a decision**: an approved item is *locked*, not merely ticked; a
+    rejected one is outstanding again with the firm's note on it; and the client is emailed
+    without anyone pressing "send reminder".
+  - **A dashboard that opens on work** — the review queue first, then overdue — with
+    per-request percent complete, oldest-outstanding age, reminder state and filters, from
+    one aggregate query rather than N+1.
+  - **Streamed zip download** foldered `01 Section/01 Item - file.pdf`, with a
+    `MANIFEST.txt` carrying the SHA-256 of every file as recorded on arrival. Superseded
+    versions are excluded by default and counted in the manifest; `?include=all` takes
+    everything.
+  - **Audit CSV export**, per request and per firm, that **verifies away from the
+    database**: `pnpm verify:audit --csv <file>` recomputes every hash from the file alone.
+
+- **Real-world proof (what actually ran):**
+
+  ```
+  ✓ ① rejecting one item of five reopens exactly that one, with the note the client reads
+  ✓ ② a resubmission is version 2, and the superseded file is retained
+  ✓ ③ approving the last required item completes the request and stops the reminders
+  ✓ ④ the zip holds the current files, foldered, with a manifest that matches
+  ✓ ⑤ the audit CSV covers the lifecycle and verifies itself away from the database
+
+  Test Files 14 passed | Tests 178 passed        ← unit + integration, real Postgres
+  typecheck clean · lint clean · format clean
+  ```
+
+  **② Versioning, in the database.** One item rejected and resubmitted; both files kept,
+  each on the version it belongs to:
+
+  ```
+        original_name      | response_version | current_version | is_current
+  -------------------------+------------------+-----------------+------------
+   form-w-9.pdf            |                1 |               2 | f
+   form-w9-signed-2026.pdf |                2 |               2 | t
+  ```
+
+  **④ The zip, read by a real extractor** — `unzip`, not the library that wrote it:
+
+  ```
+  $ unzip -t "$ZIP"
+  ...
+  No errors detected in compressed data of gather-….zip
+
+  $ unzip -l "$ZIP"
+   Rosa Delgado - Year-end documents/01 What we need/01 Form W-9 - form-w9-signed-2026.pdf
+   Rosa Delgado - Year-end documents/01 What we need/02 Bank statement - bank-statement.pdf
+   Rosa Delgado - Year-end documents/MANIFEST.txt
+  ```
+
+  The manifest carries the hash recorded when the file arrived, and the extracted bytes
+  hash to the same value — so a firm can show that what they handed on is what the client
+  sent. `form-w-9.pdf`, the version that was sent back, is absent from the default archive
+  and named in the manifest's "Not included (1)" section.
+
+  **⑤ One request's whole life, in an unbroken chain:**
+
+  ```
+   id  |          action           |   prev   |   hash
+  -----+---------------------------+----------+----------
+   774 | request.created           | 5550f55c | 30adee56
+   775 | request.structure_updated | 30adee56 | da5668d4
+   776 | request.link_issued       | da5668d4 | 58f274ed
+   777 | portal.opened             | 58f274ed | 05e739db
+   778 | portal.file_uploaded      | 05e739db | ad232546
+   779 | portal.file_uploaded      | ad232546 | 778ce3d5
+   780 | portal.submitted          | 778ce3d5 | 07e1e233
+   781 | response.rejected         | 07e1e233 | 7244139f
+   782 | portal.file_uploaded      | 7244139f | 30ca0726
+   783 | request.downloaded        | 30ca0726 | 8fbac638
+
+  $ pnpm verify:audit
+  OK: 854 events, chain intact (head 832d410fac05…)
+  ```
+
+  And the same trail, exported and checked **with no database in sight**:
+
+  ```
+  $ pnpm verify:audit --csv gather-audit-<request>.csv
+  OK: 11 events, every row's hash recomputes (head 6c8869fa…)
+      This is a filtered export, so it cannot show whether events are missing.
+      Export the whole trail (no request or date filter) for that.
+
+  $ sed -i 's/Wrong year./Right year./' gather-audit-<request>.csv
+  $ pnpm verify:audit --csv gather-audit-<request>.csv
+  FAIL at id=781: hash mismatch on event 781 — its content was modified after it was
+  written (stored 7244139f3a18…, recomputed 832d8f9075b9…)
+  Verified 7 event(s) before failing.                                        exit=1
+  ```
+
+  Eleven characters changed in a 6 KB file — `Wrong year.` to `Right year.`, the same
+  length — and the check names the event, the field's effect on the hash, and how far it
+  got. It failed at the 8th row of 11, which is where the change is.
+
+  **Review decisions, all audited:**
+
+  ```
+         action       | count
+  --------------------+-------
+   response.approved  |    28
+   response.rejected  |    10
+   request.completed  |     6
+   request.downloaded |     4
+   audit.exported     |     2
+  ```
+
+- **Decisions & why:**
+  - **An approved item is locked on the client's side.** Leaving it editable invites a
+    client to "improve" a document that has already been filed, and the firm would never
+    know. The portal says so in words rather than just disabling a control.
+  - **A rejected item is outstanding again even though its file is still attached.** This
+    was a real bug found by the test: the progress counter said "5 of 5 done" after a
+    rejection, because the old file was still there and `isAnswered` only looks at content.
+    The firm's decision has to outrank what is attached — both server-side and in the live
+    counter, which now updates the moment the client starts fixing it rather than a
+    debounce later.
+  - **The rejection email is sent after the transaction commits, not inside it.** A mail
+    server that hangs must not hold a database transaction open. A rejection recorded whose
+    email failed is recoverable — the item is visibly outstanding and the next reminder
+    lists it. The reverse would tell a client to fix something the firm never sent back.
+  - **Approving an empty item is allowed.** A firm told on the phone that a client has no
+    rental income should be able to tick it off; refusing would push them into asking the
+    client to type "n/a", which is worse for everyone and leaves a less honest record than
+    an approval with the firm's name on it.
+  - **The export reports two properties, not one.** Every export proves *no row was
+    altered*. Only a complete export proves *no row is missing*, because a filtered trail
+    has gaps in its ids by construction. Collapsing both into "chain intact" would be
+    claiming something a filtered file cannot support, and this is a feature sold as
+    evidence.
+  - **The CSV guards against formula injection.** A client who names a file
+    `=cmd|'/c calc'!A1` would otherwise get it executed on the firm's machine when they open
+    the export. A leading tab neutralises it and is invisible in the cell.
+  - **The zip is streamed with lazy entry opening.** A 40-file request holds one decryption
+    stream at a time rather than forty, and a year of bank statements never lands in the
+    app's heap.
+  - **Downloading is an audit event, written before the bytes move.** A firm taking a copy
+    of a client's tax documents off the system is exactly the access 16 CFR 314.4(c)(8) asks
+    to be logged, and an event written only on success would miss a download that failed
+    halfway.
+
+- **Deviations from plan:** three, plus one correction, all written into `plan.md` §9 — the
+  two-property export verdict; ASCII punctuation in zip entry paths; superseded versions
+  excluded by default with `?include=all`; and the `auth.sign_up` NULL-`firm_id` fix.
+
+  Also worth recording: **the zip acceptance criterion caught a real interoperability
+  problem.** `unzip -t` failed on the first archive with "mismatching local filename". The
+  archive was correct — Python's `zipfile` read every name perfectly and reported no errors,
+  and yazl sets the UTF-8 flag in both the local and central headers — but Info-ZIP UnZip
+  6.00, dated 2009 and still what `unzip` is on Debian and Ubuntu, warns and exits non-zero
+  on any non-ASCII entry name. The em-dash that triggered it was a typographic preference of
+  ours, not the client's data, so it is now a hyphen. Characters that come from a firm's or
+  a client's own name are kept, because mangling somebody's name is worse than a warning on
+  a seventeen-year-old tool.
+
+- **Known issues:**
+  1. **The audit viewer is the request page's History card and the dashboard's activity
+     list, not a dedicated page.** Filtering and paging live in the CSV export
+     (`?from=`/`?to=`), not in the UI. Fine for a firm's first year; a firm with 50,000
+     events will want a real viewer.
+  2. **PDF export of the audit trail is not built.** plan.md §9 said "CSV/PDF"; CSV is what
+     ships. A PDF needs a rendering dependency and a layout, and the CSV is what actually
+     gets attached to an email or opened in Excel. Say the word and it is a small addition.
+  3. **`request.downloaded` records that a zip was requested, not that it arrived.** The
+     event is written before the stream starts, deliberately — but a download the browser
+     cancelled halfway still shows as one that happened.
+  4. **No bulk review.** Approving 25 items is 25 keystrokes (`a`, `j`, `a`, `j`, …). That
+     is fast, but "approve everything outstanding" is the obvious next thing a firm will ask
+     for, and per-item approval being the product's whole thesis is exactly why it is not
+     there by default.
+  5. **The dashboard has no pagination**, carried over. Every matching request renders.
+  6. **A request whose reminders were stopped by completion does not restart them** if the
+     firm later rejects an item. The rejection puts the request back to `in_progress`, so a
+     schedule that is still active resumes — but one that was switched off stays off, and
+     nothing prompts the firm to turn it back on.
+  7. Carried over: item drag cannot cross sections; uploads cannot resume; no virus scanning
+     until Phase 6; Resend unproven; Dependabot #4 (TypeScript 5.9 → 6.0.3) must not be
+     merged.
+
+- **Next step (exact resume instruction):** `Start Phase 6: Security hardening pass — per plan.md §9.`

@@ -80,9 +80,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # GNU oath-toolkit generates the TOTP codes, standing in for an authenticator app.
-      - name: Install oathtool
-        run: sudo apt-get update && sudo apt-get install -y oathtool
+      # oathtool generates the TOTP codes, standing in for an authenticator app. `unzip`
+      # reads the download archive — deliberately a real extractor rather than the library
+      # that wrote it, because "opens on someone else's machine" is the actual claim.
+      - name: Install oathtool and unzip
+        run: sudo apt-get update && sudo apt-get install -y oathtool unzip
 
       - uses: pnpm/action-setup@v6
 

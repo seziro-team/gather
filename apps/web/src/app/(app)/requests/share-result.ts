@@ -17,3 +17,7 @@ export type ScheduleResult =
 export type SendNowResult = { ok: true } | { ok: false; error: string };
 
 export type CompleteResult = { ok: true } | { ok: false; error: string };
+
+export type ReviewActionResult =
+  | { ok: true; status: 'approved' | 'rejected'; completed: boolean; requiredRemaining: number }
+  | { ok: false; error: string };

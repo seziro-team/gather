@@ -21,11 +21,13 @@ import type { FormState } from '@/lib/form-state';
 import type { SaveStructureResult } from './structure-result';
 import { cadenceSchema, describeCadence } from '@gather/core';
 import { saveSchedule, sendReminderNow } from '@/lib/reminders';
+import { approve, reject } from '@/lib/review';
 import type {
   CompleteResult,
   FirmDownloadResult,
   LinkActionResult,
   NewLinkResult,
+  ReviewActionResult,
   ScheduleResult,
   SendNowResult,
 } from './share-result';
@@ -330,4 +332,66 @@ export async function completeRequestAction(requestId: string): Promise<Complete
 
   revalidatePath(`/requests/${requestId}`);
   return { ok: true };
+}
+
+/**
+ * Approve one item.
+ *
+ * Approving the last required item completes the request and stops its reminders, in the
+ * same transaction — so there is no window in which a finished request is still chasing.
+ */
+export async function approveItemAction(
+  requestId: string,
+  itemId: string,
+): Promise<ReviewActionResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(itemId).success) {
+    return { ok: false, error: 'That item could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  const outcome = await approve(actor, requestId, itemId);
+  if (!outcome.ok) return outcome;
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath('/dashboard');
+  return {
+    ok: true,
+    status: 'approved',
+    completed: outcome.result.completed,
+    requiredRemaining: outcome.result.requiredRemaining,
+  };
+}
+
+/** Send one item back with a note, and email the client to say so. */
+export async function rejectItemAction(
+  requestId: string,
+  itemId: string,
+  note: string,
+): Promise<ReviewActionResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(itemId).success) {
+    return { ok: false, error: 'That item could not be identified.' };
+  }
+
+  const parsed = z
+    .string()
+    .trim()
+    .min(1, 'Say what is wrong with it — the client sees this note and nothing else.')
+    .max(1000, 'Keep the note under 1000 characters.')
+    .safeParse(note);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]!.message };
+  }
+
+  const actor = await currentActor();
+  const outcome = await reject(actor, requestId, itemId, parsed.data);
+  if (!outcome.ok) return outcome;
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath('/dashboard');
+  return {
+    ok: true,
+    status: 'rejected',
+    completed: false,
+    requiredRemaining: outcome.result.requiredRemaining,
+  };
 }

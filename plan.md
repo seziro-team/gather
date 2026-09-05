@@ -1,7 +1,8 @@
 # Gather — Build Plan
 
-**Status:** Phases 1–4 shipped (foundation; request builder and built-in templates; client
-portal with encrypted uploads; reminder engine). Phase 5 is next.
+**Status:** Phases 1–5 shipped (foundation; request builder and built-in templates; client
+portal with encrypted uploads; reminder engine; review, dashboard and evidence export).
+Phase 6 is next.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -861,7 +862,7 @@ DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 
 ---
 
-### Phase 5 — Approve/reject, dashboard, zip, audit export
+### Phase 5 — Approve/reject, dashboard, zip, audit export ✅ **shipped**
 **Goal:** the firm side closes the loop.
 
 Tasks: review UI (per item: approve / reject + note, with keyboard flow); rejection reopens exactly
@@ -869,21 +870,53 @@ that item and re-notifies; response versioning; dashboard (all requests, status,
 oldest-outstanding, filters); download-all as a streamed zip with sane filenames
 (`{Client}/{Section}/{Item}-{original}`); audit trail viewer + CSV/PDF export.
 
-**Acceptance:** ① Reject 1 of 5 items with a note → client link shows that one item outstanding,
-the other four locked as approved, and the rejection note is visible. ② Client resubmits → `version=2`,
-old file retained and still auditable. ③ Approve all → status `complete`, reminders stop. ④ Zip
-contains exactly the approved files, opens on macOS/Windows/Linux, filenames sane. ⑤ Audit CSV
-covers the whole lifecycle and re-verifies its hash chain after export.
+> **Deviation (P5).** The audit export reports **two properties, not one**. Every export can
+> prove *no row was altered* — each row's hash recomputes from its own content. Only a
+> **complete** export can prove *no row is missing*, because a trail filtered to one request
+> has gaps in its ids by construction. `verifyAuditRows` and `pnpm verify:audit --csv` report
+> them separately rather than collapsing both into a reassuring "chain intact", which would
+> be claiming something a filtered file cannot support.
+>
+> **Deviation (P5).** Zip entry paths use ASCII punctuation (`01 Income/02 Bank - scan.pdf`)
+> rather than an em-dash. The archives are correct UTF-8 with the flag set, and Python's
+> `zipfile`, macOS and Windows all read them — but Info-ZIP UnZip 6.00 (2009), which is
+> still what `unzip` is on Debian and Ubuntu, warns and exits non-zero on any non-ASCII
+> entry name. Characters that come from a firm's or a client's own data are kept; decorative
+> ones of ours are not worth the warning.
+>
+> **Deviation (P5).** The zip excludes superseded versions by default, with
+> `?include=all` for the full set, and the `MANIFEST.txt` says how many were left out.
+> "Download everything" to somebody about to hand a folder to a tax preparer means the
+> current documents, not three drafts of one.
+>
+> **Correction (P5).** `auth.sign_up` carries a NULL `firm_id` (a known issue since Phase 1)
+> and was therefore missing from every firm-scoped view. The export now unions on firm
+> membership, so the first event of an install appears in the trail it belongs to.
+
+**Acceptance:** ① Reject 1 of 5 items with a note → the client link shows that one item
+outstanding, the other four locked as approved (not merely ticked), and the note is visible.
+② Client resubmits → `version=2`, old file retained and still auditable. ③ Approve all →
+status `complete` and reminders stop, in the same transaction. ④ The zip holds the current
+files, foldered, opens with a real extractor, and its manifest hashes match the bytes.
+⑤ The audit CSV covers the whole lifecycle and re-verifies **away from the database**;
+tampering with one byte makes `pnpm verify:audit --csv` fail.
 
 **Demo script:**
 ```bash
-# browser: review → reject "2024 Form 1098" with note "This is the 2023 copy"
-curl -sS "$PORTAL" -b "$COOKIE" | grep -c 'data-status="rejected"'   # 1
-curl -sS "$PORTAL" -b "$COOKIE" | grep -c 'data-status="approved"'   # 4
-curl -sS -o all.zip localhost:3000/api/requests/$REQ/download -H "$AUTH"
-unzip -l all.zip
-curl -sS localhost:3000/api/requests/$REQ/audit.csv -H "$AUTH" | tee audit.csv | head
-pnpm verify:audit --csv audit.csv    # chain intact
+# ① … ⑤ — driven through the real UI, with a real zip and a real CSV
+pnpm exec playwright test --project=chromium review.spec.ts
+
+# The firm's queue: what needs a person, and what is overdue.
+open http://localhost:3000/dashboard
+
+# ④ the archive, read by a real extractor rather than a library that wrote it
+unzip -t "$ZIP" && unzip -l "$ZIP"
+python3 -c "import zipfile;z=zipfile.ZipFile('$ZIP');print(z.testzip());print(z.namelist())"
+
+# ⑤ evidence, verified with no database in sight
+pnpm verify:audit --csv gather-audit-$REQ.csv
+sed -i 's/Wrong year./Right year./' gather-audit-$REQ.csv
+pnpm verify:audit --csv gather-audit-$REQ.csv      # FAIL: content was modified
 ```
 
 ---
@@ -995,4 +1028,5 @@ Each phase is designed to start from a cleared context. Read `CLAUDE.md`, then t
 - ~~**Phase 2:** `Start Phase 2: Request builder + real templates — per plan.md §9.`~~ — shipped.
 - ~~**Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`~~ — shipped.
 - ~~**Phase 4:** `Start Phase 4: Reminder engine — per plan.md §9.`~~ — shipped.
-- **Phase 5:** `Start Phase 5: Approve/reject, dashboard, zip, audit export — per plan.md §9.`
+- ~~**Phase 5:** `Start Phase 5: Approve/reject, dashboard, zip, audit export — per plan.md §9.`~~ — shipped.
+- **Phase 6:** `Start Phase 6: Security hardening pass — per plan.md §9.`

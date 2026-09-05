@@ -1,46 +1,98 @@
 import Link from 'next/link';
-import { count, desc, eq, isNull, and } from 'drizzle-orm';
-import { auditEvent, client, getDb, request } from '@gather/db';
-import { Alert, Card, linkButton } from '@/components/ui';
+import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import {
+  auditEvent,
+  client,
+  countRequests,
+  firmTotals,
+  getDb,
+  listRequestSummaries,
+  percentComplete,
+  type RequestFilter,
+  type RequestSummary,
+} from '@gather/db';
+import { Alert, Badge, Card, linkButton } from '@/components/ui';
+import { ACTION_LABELS } from '@/lib/audit-labels';
+import { formatDueDate } from '@/lib/format';
 import { requireReadyUser } from '@/lib/session';
+
+/**
+ * What the firm is waiting on.
+ *
+ * The one question this page answers is "what needs me?", so the review queue is first,
+ * overdue is second, and everything else is a filter away. A dashboard that opens on a
+ * list of counts is a dashboard people check once a week; this one opens on work.
+ */
 
 export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Dashboard · Gather' };
 
-const ACTION_LABELS: Record<string, string> = {
-  'auth.sign_up': 'Account created',
-  'auth.sign_in': 'Signed in',
-  'auth.sign_out': 'Signed out',
-  'auth.two_factor.enable_requested': 'Two-factor setup started',
-  'auth.two_factor.verified': 'Two-factor code verified',
-  'auth.two_factor.disabled': 'Two-factor turned off',
-  'auth.two_factor.backup_code_used': 'Backup code used',
-  'firm.created': 'Firm created',
-  'firm.member_added': 'Member added',
-  'client.created': 'Client added',
-  'client.updated': 'Client updated',
-  'client.archived': 'Client archived',
-  'client.restored': 'Client restored',
-  'request.created': 'Request created',
-  'request.updated': 'Request details changed',
-  'request.structure_updated': 'Checklist changed',
-  'request.deleted': 'Request deleted',
-  'template.created': 'Template saved',
-  'template.deleted': 'Template deleted',
+const FILTERS: { key: RequestFilter; label: string }[] = [
+  { key: 'needs-review', label: 'Waiting on you' },
+  { key: 'overdue', label: 'Overdue' },
+  { key: 'open', label: 'Open' },
+  { key: 'complete', label: 'Complete' },
+  { key: 'all', label: 'All' },
+];
+
+const STATUS_TONE: Record<string, 'green' | 'amber' | 'brand' | 'neutral'> = {
+  draft: 'neutral',
+  sent: 'brand',
+  in_progress: 'brand',
+  submitted: 'amber',
+  complete: 'green',
 };
 
-export default async function DashboardPage() {
+const STATUS_LABEL: Record<string, string> = {
+  draft: 'Draft',
+  sent: 'Sent — not opened',
+  in_progress: 'With the client',
+  submitted: 'Waiting on you',
+  complete: 'Complete',
+  archived: 'Archived',
+};
+
+function isFilter(value: string | undefined): value is RequestFilter {
+  return (
+    value === 'all' ||
+    value === 'open' ||
+    value === 'needs-review' ||
+    value === 'overdue' ||
+    value === 'complete'
+  );
+}
+
+/** "18 days" — how long the oldest unanswered item has been waiting. */
+function waitingFor(summary: RequestSummary, now: Date): string | null {
+  const since = summary.oldestOutstandingAt ?? summary.sentAt;
+  if (!since || summary.status === 'complete' || summary.status === 'draft') return null;
+  const days = Math.floor((now.getTime() - since.getTime()) / 86_400_000);
+  if (days < 1) return 'today';
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string }>;
+}) {
   const { membership } = await requireReadyUser();
   const db = getDb();
   const firmId = membership.firm.id;
 
-  const [clientCount, requestCount, recent] = await Promise.all([
+  const params = await searchParams;
+  // Default to the queue rather than to everything: the firm opens this to find work.
+  const filter: RequestFilter = isFilter(params.filter) ? params.filter : 'needs-review';
+
+  const [clientCount, totalRequests, totals, summaries, recent] = await Promise.all([
     db
       .select({ total: count() })
       .from(client)
       .where(and(eq(client.firmId, firmId), isNull(client.archivedAt))),
-    db.select({ total: count() }).from(request).where(eq(request.firmId, firmId)),
+    countRequests(db, firmId),
+    firmTotals(db, firmId),
+    listRequestSummaries(db, firmId, filter),
     db
       .select()
       .from(auditEvent)
@@ -49,64 +101,154 @@ export default async function DashboardPage() {
       .limit(10),
   ]);
 
+  const now = new Date();
   const formatter = new Intl.DateTimeFormat('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone: membership.firm.timezone,
   });
 
+  const counts: Record<RequestFilter, number> = {
+    'needs-review': totals.needsReview,
+    overdue: totals.overdue,
+    open: totals.open,
+    complete: totals.complete,
+    all: totalRequests,
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">{membership.firm.name}</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Signed in as {membership.role}. Times shown in {membership.firm.timezone}.
-        </p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <p className="text-sm font-medium text-slate-500">Document requests</p>
-          <p className="mt-1 text-3xl font-semibold text-slate-900">
-            {requestCount[0]?.total ?? 0}
-          </p>
-        </Card>
-        <Card>
-          <p className="text-sm font-medium text-slate-500">Active clients</p>
-          <p className="mt-1 text-3xl font-semibold text-slate-900">{clientCount[0]?.total ?? 0}</p>
-        </Card>
-      </div>
-
-      {requestCount[0]?.total ? null : (
-        <Alert tone="info" title="Start here">
-          Add a client, then build their request from one of the four included templates — or from
-          nothing, if you would rather. Sending the request to the client, and the reminders that
-          chase it, arrive in the next two releases.
-        </Alert>
-      )}
-
-      <div className="flex flex-wrap gap-3">
-        <Link href="/requests/new" className={linkButton()}>
-          New request
-        </Link>
-        <Link href="/clients/new" className={linkButton('secondary')}>
-          Add client
-        </Link>
-        <Link href="/templates" className={linkButton('secondary')}>
-          Browse templates
-        </Link>
-      </div>
-
-      <Card>
-        <div className="mb-4 flex items-baseline justify-between gap-4">
-          <h2 className="text-lg font-semibold text-slate-900">Audit trail</h2>
-          <p className="text-xs text-slate-500">
-            Hash-chained and append-only. Verify it with <code>pnpm verify:audit</code>.
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">{membership.firm.name}</h1>
+          <p className="mt-1 text-sm text-slate-600">
+            {clientCount[0]?.total ?? 0} client{(clientCount[0]?.total ?? 0) === 1 ? '' : 's'} ·{' '}
+            {totalRequests} request{totalRequests === 1 ? '' : 's'}
           </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/requests/new" className={linkButton()}>
+            New request
+          </Link>
+          <a href="/audit" className={linkButton('secondary')} data-testid="export-audit">
+            Export audit trail
+          </a>
+        </div>
+      </div>
 
+      {totals.needsReview > 0 ? (
+        <Alert tone="warning" title={`${totals.needsReview} waiting for your review`}>
+          A client has sent everything they were asked for. Nothing is complete until you say so,
+          item by item.
+        </Alert>
+      ) : null}
+
+      <nav className="flex flex-wrap gap-2" aria-label="Filter requests">
+        {FILTERS.map((entry) => {
+          const active = entry.key === filter;
+          return (
+            <Link
+              key={entry.key}
+              href={`/dashboard?filter=${entry.key}`}
+              data-testid={`filter-${entry.key}`}
+              aria-current={active ? 'page' : undefined}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium ring-1 ring-inset ${
+                active
+                  ? 'bg-brand-700 ring-brand-700 text-white'
+                  : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              {entry.label}
+              <span className={active ? 'ml-1.5 opacity-80' : 'ml-1.5 text-slate-400'}>
+                {counts[entry.key]}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <Card>
+        {summaries.length === 0 ? (
+          <p className="text-sm text-slate-600">
+            {totalRequests === 0
+              ? 'No requests yet. Create one and send the link to a client — they need no account.'
+              : 'Nothing here right now.'}
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100" data-testid="request-list">
+            {summaries.map((summary) => {
+              const percent = percentComplete(summary);
+              const waiting = waitingFor(summary, now);
+              const overdue =
+                summary.dueAt !== null && summary.dueAt < now && summary.status !== 'complete';
+
+              return (
+                <li
+                  key={summary.id}
+                  data-testid="request-row"
+                  data-request-id={summary.id}
+                  data-status={summary.status}
+                  className="py-3"
+                >
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <Link
+                      href={`/requests/${summary.id}`}
+                      className="text-brand-700 text-sm font-medium hover:underline"
+                    >
+                      {summary.title}
+                    </Link>
+                    <span className="text-sm text-slate-600">{summary.clientName}</span>
+                    <Badge tone={STATUS_TONE[summary.status] ?? 'neutral'}>
+                      {STATUS_LABEL[summary.status] ?? summary.status}
+                    </Badge>
+                    {summary.awaitingReview > 0 ? (
+                      <Badge tone="amber">{summary.awaitingReview} to review</Badge>
+                    ) : null}
+                    {overdue && summary.dueAt ? (
+                      <Badge tone="red">Due {formatDueDate(summary.dueAt)}</Badge>
+                    ) : null}
+                    {summary.remindersActive ? <Badge tone="brand">Reminding</Badge> : null}
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <div
+                      role="progressbar"
+                      aria-valuenow={percent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label={`${summary.title} progress`}
+                      className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-200"
+                    >
+                      <div
+                        className={
+                          percent === 100 ? 'h-full bg-emerald-500' : 'bg-brand-600 h-full'
+                        }
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-slate-600">
+                      {summary.approvedItems} of {summary.totalItems} approved
+                    </span>
+                    {waiting ? (
+                      <span className="text-xs text-slate-500">· outstanding {waiting}</span>
+                    ) : null}
+                    {summary.lastReminderAt ? (
+                      <span className="text-xs text-slate-500">
+                        · last reminded {formatter.format(summary.lastReminderAt)}
+                      </span>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
+
+      <Card>
+        <h2 className="mb-3 text-base font-semibold text-slate-900">Recent activity</h2>
         {recent.length === 0 ? (
-          <p className="text-sm text-slate-600">Nothing recorded for this firm yet.</p>
+          <p className="text-sm text-slate-600">Nothing recorded yet.</p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {recent.map((event) => (
@@ -116,7 +258,6 @@ export default async function DashboardPage() {
                   {ACTION_LABELS[event.action] ?? event.action}
                 </span>
                 <span className="text-sm text-slate-500">{formatter.format(event.createdAt)}</span>
-                {event.ip ? <span className="text-xs text-slate-400">from {event.ip}</span> : null}
                 <span
                   className="ml-auto font-mono text-xs text-slate-300"
                   title={`sha256 ${event.hash}`}
@@ -128,14 +269,6 @@ export default async function DashboardPage() {
           </ul>
         )}
       </Card>
-
-      <p className="text-sm text-slate-600">
-        Manage your second factor in{' '}
-        <Link href="/account/security" className="text-brand-700 font-medium underline">
-          Security
-        </Link>
-        .
-      </p>
     </div>
   );
 }
