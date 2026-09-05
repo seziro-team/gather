@@ -1465,8 +1465,8 @@ Entry template:
 
   ```
   $ pnpm test
-   Test Files  18 passed (18)
-        Tests  232 passed (232)
+   Test Files  19 passed (19)
+        Tests  237 passed (237)
 
   $ npx playwright test           # against the built image, mail overlay up
     33 passed (20.3m)             # chromium 26 · mobile-safari 3 · team 4
@@ -1499,6 +1499,35 @@ Entry template:
      environment variables still win, so CI is unaffected, and `testDatabaseUrl()` still
      derives a `_test` database — loading `.env` can never point a truncating test at
      somebody's development data.
+
+  **A real defect, found by the capture script rather than by the test suite.**
+
+  `scripts/capture-demo.mjs` drives the product further than any single test does — sign-up
+  to submitted request to rejection — and the dashboard **500'd** the first time a client
+  actually submitted anything:
+
+  ```
+  ⨯ TypeError: c.getTime is not a function
+      at Array.map (<anonymous>)
+  ```
+
+  `listRequestSummaries` computes `min(response.updated_at)` and `max(sent_at)` as
+  `sql<Date | null>` fragments. Drizzle maps a *column* to a Date because it knows the
+  column's type; a raw fragment is an assertion it cannot check, and node-postgres has date
+  parsing switched off so drizzle can do the mapping itself. Both arrived as
+  `'2026-09-05 15:10:41.881+00'`, and "oldest outstanding" threw on the first Date method.
+
+  **This is the third time the same mistake has shipped in this codebase** — the Phase 6
+  retention purge, the Phase 7 operator console, and now the dashboard. It hid here longest
+  because with no responses in the table the aggregate is null, and null has no methods to
+  get wrong: it broke the moment a real client sent something back, which is to say for
+  every real user, on the page they open first.
+
+  Fixed by converting at the query boundary, and now covered twice over:
+  `packages/db/src/review.test.ts` (5 tests, asserting `toBeInstanceOf(Date)` on every date
+  the query returns, because a type annotation is demonstrably not what catches this) and
+  `e2e/review.spec.ts` ①, which now opens the dashboard while a request is genuinely waiting
+  — the state no test had ever rendered.
 
 - **Deviations from plan:**
   1. **No before/after photograph of an inbox.** plan.md §8 asked for the "47 chase emails"

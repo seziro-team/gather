@@ -90,6 +90,17 @@ test('① rejecting one item of five reopens exactly that one, with the note the
 }) => {
   const setup = await requestSentBack(page, browser, 'review');
 
+  // The dashboard, first — with a request actually waiting.
+  //
+  // This is where a real firm starts their day, and for a while it 500'd in exactly this
+  // state: `min(response.updated_at)` came back as a string, so "oldest outstanding" threw
+  // on a Date method. The suite never noticed because nothing here had opened the dashboard
+  // with a submitted request in it.
+  await page.goto('/dashboard');
+  await expect(page.getByText('1 waiting for your review')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Year-end documents' })).toBeVisible();
+  await expect(page.getByText(/outstanding/)).toBeVisible();
+
   await page.goto(`/requests/${setup.requestId}`);
   await expect(page.getByTestId('review-progress')).toContainText('0 of 5 approved');
 

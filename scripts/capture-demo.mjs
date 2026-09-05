@@ -106,6 +106,33 @@ async function frame(page, name) {
   await page.waitForTimeout(300);
 }
 
+/**
+ * Answers every required item still outstanding.
+ *
+ * Generic rather than a hard-coded list, because the built-in templates are free to change
+ * and a capture script that knows their contents by heart is a capture script that breaks
+ * silently the next time one does.
+ */
+async function fillRequired(page) {
+  // Files first: the same real W-9 for each, which is what a client doing this in a hurry
+  // with one scanned page would do.
+  const uploads = await page.locator('input[type="file"]').all();
+  for (const upload of uploads) {
+    const item = page.locator('li', { has: upload }).first();
+    if ((await item.getByText('irs-form-w9.pdf').count()) > 0) continue;
+    await upload.setInputFiles(join(ROOT, 'e2e/fixtures/irs-form-w9.pdf'));
+    await page.waitForTimeout(1200);
+  }
+
+  // Yes/no is a pair of visually-styled labels wrapping screen-reader-only radios, so the
+  // label is what a person taps and what this taps too.
+  for (const option of await page.locator('label').filter({ hasText: /^No$/ }).all()) {
+    await option.click().catch(() => {});
+    await page.waitForTimeout(200);
+  }
+  await page.waitForTimeout(1500);
+}
+
 async function shot(page, name) {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) });
   step(`shot: ${name}.png`);
@@ -183,6 +210,24 @@ async function main() {
   await phone.waitForTimeout(500);
   await shot(phone, 'portal-uploaded');
 
+  // Finish the rest of what the template requires, so the request really does come back to
+  // the firm. Without this the dashboard is honestly empty — nothing is waiting, because
+  // the client has not sent anything — and the screenshot would undersell the product by
+  // showing a state a real firm would rarely be looking at.
+  step('answering the rest of what the template requires');
+  await fillRequired(phone);
+  const submit = phone.getByTestId('portal-submit');
+  await submit.scrollIntoViewIfNeeded();
+  await submit.click();
+  await phone.getByTestId('portal-submitted').waitFor({ timeout: 30_000 });
+  await phone.waitForTimeout(400);
+  await shot(phone, 'portal-submitted');
+
+  step('the dashboard, with the client’s work waiting on the firm');
+  await firm.goto(`${BASE}/dashboard`);
+  await firm.waitForTimeout(600);
+  await shot(firm, 'dashboard');
+
   step('the firm reviewing, and sending one item back with a note');
   await firm.goto(`${BASE}/requests/${requestId}`);
   await frame(firm, 'Review');
@@ -206,11 +251,6 @@ async function main() {
   await phone.reload();
   await phone.waitForTimeout(800);
   await shot(phone, 'portal-rejected');
-
-  step('the dashboard');
-  await firm.goto(`${BASE}/dashboard`);
-  await firm.waitForTimeout(600);
-  await shot(firm, 'dashboard');
 
   step('the audit trail');
   await firm.goto(`${BASE}/requests/${requestId}`);

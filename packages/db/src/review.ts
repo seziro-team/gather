@@ -406,7 +406,33 @@ export async function listRequestSummaries(
     .where(and(eq(request.firmId, firmId), whereForFilter(filter)))
     .orderBy(desc(request.updatedAt));
 
-  return rows;
+  // The two aggregate timestamps come back as strings, not Dates.
+  //
+  // Drizzle maps a *column* to a Date because it knows the column's type; a `sql<Date>`
+  // fragment is an assertion it cannot check, and node-postgres has date parsing switched
+  // off so drizzle can do the mapping itself. So `min(...)` and `max(...)` arrive as
+  // `'2026-09-05 15:10:41.881+00'` — and every caller that typechecks perfectly against
+  // `Date | null` throws on `.getTime()` at runtime.
+  //
+  // This one took down the whole dashboard the moment any client submitted anything, which
+  // is to say: for every real user, on the page they open first.
+  return rows.map((row) => ({
+    ...row,
+    oldestOutstandingAt: toDate(row.oldestOutstandingAt),
+    lastReminderAt: toDate(row.lastReminderAt),
+  }));
+}
+
+/** Whatever the driver handed back, as a Date. */
+function toDate(value: Date | string | null): Date | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value;
+  // Postgres renders timestamptz as `2026-09-05 15:10:41.881+00`; the space and the
+  // two-digit offset are both outside the ISO grammar V8 parses strictly, so they are
+  // normalised rather than handed straight to `new Date`.
+  const iso = value.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function whereForFilter(filter: RequestFilter) {
