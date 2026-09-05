@@ -93,8 +93,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
+      # Chromium for the firm's dashboard, WebKit for the client's phone. The portal suite
+      # runs on WebKit at 390x844 because iOS Safari is what most of a small firm's clients
+      # are actually holding, and it is not Chromium with a narrower window.
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium webkit
 
       # Builds and boots the real image the quickstart uses, not a dev server.
       - name: Start Gather
@@ -123,6 +126,84 @@ jobs:
         if: failure()
         with:
           name: playwright-artifacts
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7
+
+  s3:
+    name: End-to-end against an S3 object store
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install oathtool
+        run: sudo apt-get update && sudo apt-get install -y oathtool
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps webkit
+
+      # plan.md §9 Phase 3 acceptance ④: the same portal tests, unchanged, against a real
+      # S3-compatible endpoint rather than the local filesystem. The credentials are
+      # generated here and thrown away with the runner — Garage is told to accept exactly
+      # these, so there is nothing to configure and nothing to leak.
+      - name: Start Gather on Garage
+        run: |
+          cp .env.example .env
+          {
+            echo "S3_BUCKET=gather"
+            echo "S3_ACCESS_KEY_ID=GK$(openssl rand -hex 12)"
+            echo "S3_SECRET_ACCESS_KEY=$(openssl rand -hex 32)"
+            echo "GARAGE_RPC_SECRET=$(openssl rand -hex 32)"
+            # Required explicitly under STORAGE_DRIVER=s3: Gather refuses to generate a key
+            # it cannot store beside the objects it protects.
+            echo "GATHER_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+          } >> .env
+          docker compose -f docker-compose.yml -f docker-compose.s3.yml \
+                         -f docker-compose.test.yml up -d --build
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
+              curl -sS http://127.0.0.1:3000/api/health; echo; exit 0
+            fi
+            sleep 2
+          done
+          echo "Gather did not become healthy"
+          docker compose -f docker-compose.yml -f docker-compose.s3.yml logs
+          exit 1
+
+      - name: Run the portal suite against S3
+        run: pnpm exec playwright test --project=mobile-safari
+
+      # Proof the objects are in the bucket and not quietly on a disk somewhere.
+      - name: Show what landed in the bucket
+        run: |
+          docker run --rm --network container:gather-garage-1 \
+            -v gather_garage-meta:/var/lib/garage/meta \
+            -v "$PWD/docker/garage.toml:/etc/garage.toml:ro" \
+            -e GARAGE_RPC_SECRET="$(grep ^GARAGE_RPC_SECRET= .env | cut -d= -f2)" \
+            --entrypoint garage gather/garage-init:local bucket info gather
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.s3.yml logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts-s3
           path: |
             artifacts/
             playwright-report/
