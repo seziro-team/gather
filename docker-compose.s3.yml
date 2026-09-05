@@ -1,0 +1,95 @@
+# Gather with an S3-compatible object store instead of local disk.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.s3.yml up -d
+#
+# This overlay adds Garage (AGPL-3.0, https://garagehq.deuxfleurs.fr) and points Gather's
+# storage driver at it. It exists for two reasons: to give a self-hoster who already thinks
+# in buckets a one-command path, and to prove — in the end-to-end suite, against a real
+# object store — that the `s3` driver behaves identically to `local`.
+#
+# You do NOT need this. The default local-disk driver is the recommended setup for a firm
+# on one server: fewer moving parts, no extra memory, same encryption. See plan.md §4.2.
+#
+# To point Gather at a bucket you already have (AWS S3, Cloudflare R2, Backblaze B2,
+# Wasabi, SeaweedFS, an existing MinIO), do not use this file at all — set STORAGE_DRIVER=s3
+# and the S3_* variables in .env and run the ordinary compose file.
+#
+# ⚠️ With STORAGE_DRIVER=s3, GATHER_ENCRYPTION_KEY must be set explicitly in .env. Gather
+# refuses to generate a key it cannot store next to the objects it protects: a key that
+# only exists in a container volume is a way to lose every document to `docker compose down -v`.
+
+services:
+  garage:
+    image: dxflrs/garage:v2.3.0
+    restart: unless-stopped
+    environment:
+      # A 32-byte hex string; see .env.example for how to generate one.
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env — openssl rand -hex 32}
+    volumes:
+      - ./docker/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    # Not published to the host. Gather reaches it over the compose network; nothing else
+    # needs to. Publish 3900 yourself if you want to point `aws s3` at it from your machine.
+    expose:
+      - '3900'
+    healthcheck:
+      # Exec form, and the garage binary rather than curl: the upstream image is
+      # distroless — it holds `/garage` and nothing else, not even a shell — so a
+      # CMD-SHELL healthcheck can never run in it. `garage status` exits non-zero until
+      # the node is answering on its own RPC socket, which is exactly the question.
+      test: ['CMD', '/garage', 'status']
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 5s
+
+  # Runs once per `up`, brings a fresh node to a usable bucket, then exits 0.
+  # Idempotent: on an already-configured volume every step is a no-op.
+  garage-init:
+    # Garage's own binary on a base that has a shell — see docker/garage-init.Dockerfile.
+    build:
+      context: ./docker
+      dockerfile: garage-init.Dockerfile
+    image: gather/garage-init:local
+    depends_on:
+      garage:
+        condition: service_healthy
+    # Shares the daemon's network namespace so the CLI reaches it on localhost:3901,
+    # which is what `rpc_bind_addr` in garage.toml already says. The alternative,
+    # GARAGE_RPC_HOST, wants `<full-node-id>@host:port` — and the node id is generated on
+    # the node's first boot, so nothing outside it can know the value in advance.
+    network_mode: 'service:garage'
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env}
+      S3_BUCKET: ${S3_BUCKET:-gather}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID in .env}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env}
+    volumes:
+      - ./docker/garage.toml:/etc/garage.toml:ro
+      # The CLI authenticates to the node with the keypair the daemon generated on its
+      # first boot and left in the metadata directory. It reads those two files and never
+      # opens the LMDB database — that only happens when the CLI *is* the node.
+      - garage-meta:/var/lib/garage/meta
+    restart: 'no'
+
+  web:
+    depends_on:
+      db:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      STORAGE_DRIVER: s3
+      S3_BUCKET: ${S3_BUCKET:-gather}
+      S3_REGION: garage
+      S3_ENDPOINT: http://garage:3900
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID in .env}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env}
+      # Garage implements no vhost-style bucket addressing that Gather could use, and
+      # neither does any other self-hosted endpoint worth pointing at.
+      S3_FORCE_PATH_STYLE: 'true'
+
+volumes:
+  garage-meta:
+  garage-data:

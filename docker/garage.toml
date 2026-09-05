@@ -1,0 +1,40 @@
+# Garage — the optional S3-compatible object store for Gather's `s3` storage driver.
+#
+# Verified against dxflrs/garage:v2.3.0 (AGPL-3.0), the current release on 2026-09-05.
+# See plan.md §4.2 for why Gather ships Garage rather than MinIO: the minio/minio
+# repository was archived on 2026-04-25 and no longer publishes community binaries.
+#
+# This is a single-node configuration. It is what a firm running Gather on one server
+# wants, and it is what the end-to-end suite proves the `s3` driver against. For a real
+# multi-node cluster, follow Garage's own documentation rather than scaling this file:
+#   https://garagehq.deuxfleurs.fr/documentation/cookbook/real-world/
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+
+# LMDB is Garage's recommended engine and the only one that needs no extra services.
+db_engine = "lmdb"
+
+# One node holds one copy. Garage will warn that this offers no redundancy, which is
+# true and is the operator's job to solve with backups of the volume — exactly as it is
+# for the local driver and for Postgres.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+# The address other nodes would reach this one on. Single-node, so it is itself, by the
+# compose service name.
+rpc_public_addr = "garage:3901"
+
+# rpc_secret is NOT set here. It comes from GARAGE_RPC_SECRET in the environment, which
+# docker-compose.s3.yml generates into .env on first run — a secret in a file that gets
+# committed is a secret everybody has.
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+# Gather always talks path-style (S3_FORCE_PATH_STYLE=true), so this is only here to
+# satisfy Garage's own vhost-style routing. Nothing resolves it.
+root_domain = ".s3.garage"
+
+[admin]
+api_bind_addr = "[::]:3903"

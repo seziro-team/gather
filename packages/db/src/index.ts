@@ -3,4 +3,6 @@ export * from './schema/index.js';
 export * from './client.js';
 export * from './audit.js';
 export * from './structure.js';
+export * from './responses.js';
+export * from './portal.js';
 export * from './migrations.js';

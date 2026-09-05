@@ -1,14 +1,16 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { and, desc, eq } from 'drizzle-orm';
-import { countItems } from '@gather/core';
-import { auditEvent, getDb, readRequestStructure } from '@gather/db';
-import { StructureOutline } from '@/components/structure';
+import { auditEvent, getDb } from '@gather/db';
+import { RequestChecklist } from '@/components/request-checklist';
 import { Alert, Badge, Button, Card, linkButton, PageHeader } from '@/components/ui';
+import { listPortalLinks } from '@/lib/portal';
+import { readPortalView } from '@/lib/portal-data';
 import { getRequest } from '@/lib/requests';
 import { requireReadyUser } from '@/lib/session';
 import { deleteRequestAction } from '../actions';
 import { RequestDetailsForm, SaveAsTemplateForm } from './request-forms';
+import { PortalLinks } from './share-forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +21,22 @@ const ACTION_LABELS: Record<string, string> = {
   'request.updated': 'Details changed',
   'request.structure_updated': 'Checklist changed',
   'template.created': 'Saved as a template',
+  'request.link_issued': 'Portal link created',
+  'request.link_revoked': 'Portal link revoked',
+  'portal.opened': 'Client opened the link',
+  'portal.file_uploaded': 'Client uploaded a file',
+  'portal.file_removed': 'Client removed a file',
+  'portal.submitted': 'Client sent it back',
+  'portal.link_rejected': 'A dead link was tried',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  sent: 'Sent — not opened yet',
+  in_progress: 'Client is working on it',
+  submitted: 'Sent back for review',
+  complete: 'Complete',
+  archived: 'Archived',
 };
 
 export default async function RequestPage({ params }: { params: Promise<{ id: string }> }) {
@@ -28,8 +46,9 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   if (!found) notFound();
 
   const db = getDb();
-  const [body, events] = await Promise.all([
-    readRequestStructure(db, id),
+  const [view, links, events] = await Promise.all([
+    readPortalView(id),
+    listPortalLinks(id),
     db
       .select()
       .from(auditEvent)
@@ -37,10 +56,6 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
       .orderBy(desc(auditEvent.id))
       .limit(20),
   ]);
-
-  const required = body.sections.flatMap((section) =>
-    section.items.filter((entry) => entry.required),
-  ).length;
 
   const formatter = new Intl.DateTimeFormat('en-GB', {
     dateStyle: 'medium',
@@ -73,9 +88,14 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge>{found.request.status === 'draft' ? 'Draft' : found.request.status}</Badge>
+        <Badge tone={found.request.status === 'submitted' ? 'green' : 'neutral'}>
+          {STATUS_LABELS[found.request.status] ?? found.request.status}
+        </Badge>
         <Badge>
-          {body.sections.length} sections · {countItems(body)} items · {required} required
+          {view.sections.length} sections · {view.total} items · {view.required} required
+        </Badge>
+        <Badge tone={view.answered === view.total && view.total > 0 ? 'green' : 'neutral'}>
+          {view.answered} of {view.total} received
         </Badge>
         {found.request.dueAt ? (
           <Badge tone="amber">Due {dateOnly.format(found.request.dueAt)}</Badge>
@@ -85,15 +105,36 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
         ) : null}
       </div>
 
-      <Alert tone="info" title="Not yet sent to anyone">
-        Gather has not emailed this client. Magic-link portals arrive in the next release, and
-        reminders in the one after — until then this is a checklist you can build, template and
-        audit.
-      </Alert>
+      <Card>
+        <h2 className="text-lg font-semibold text-slate-900">Share with your client</h2>
+        <p className="mt-1 mb-4 text-sm text-slate-600">
+          A portal link needs no account and no password. Send it however you already talk to this
+          client — automatic email and reminders arrive in the next release. Each link can be
+          revoked on its own, and every time one is opened it is recorded below.
+        </p>
+        <PortalLinks
+          requestId={id}
+          links={links.map((link) => ({
+            id: link.id,
+            createdAt: link.createdAt.toISOString(),
+            expiresAt: link.expiresAt.toISOString(),
+            revokedAt: link.revokedAt?.toISOString() ?? null,
+            lastUsedAt: link.lastUsedAt?.toISOString() ?? null,
+            opens: link.opens,
+          }))}
+        />
+      </Card>
+
+      {found.request.status !== 'draft' ? null : (
+        <Alert tone="info" title="Nothing has been sent yet">
+          Creating the first link marks this request as sent and freezes your firm’s name and colour
+          onto it, so a later rebrand does not change what this client saw.
+        </Alert>
+      )}
 
       <Card>
         <h2 className="mb-4 text-lg font-semibold text-slate-900">Checklist</h2>
-        <StructureOutline body={body} />
+        <RequestChecklist requestId={id} view={view} />
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">

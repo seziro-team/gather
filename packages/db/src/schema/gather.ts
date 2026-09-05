@@ -216,6 +216,12 @@ export const file = pgTable(
       .references(() => response.id, { onDelete: 'cascade' }),
     /** Which response version this upload belongs to; superseded files are kept, not deleted. */
     responseVersion: integer().notNull().default(1),
+    /**
+     * Which driver holds the bytes, recorded per file rather than read from the environment
+     * at download time. A firm that moves from local disk to S3 must still be able to open
+     * everything it collected before the switch.
+     */
+    storageDriver: text().notNull().default('local'),
     storageKey: text().notNull().unique(),
     originalName: text().notNull(),
     mime: text().notNull(),

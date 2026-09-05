@@ -9,6 +9,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/db/package.json ./packages/db/
+COPY packages/storage/package.json ./packages/storage/
 COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile
 
@@ -17,6 +18,7 @@ COPY packages ./packages
 COPY apps ./apps
 RUN pnpm --filter @gather/core build \
   && pnpm --filter @gather/db build \
+  && pnpm --filter @gather/storage build \
   && pnpm --filter @gather/web build
 
 # ── runtime ──────────────────────────────────────────────────────────────────
@@ -40,8 +42,9 @@ COPY --from=builder --chown=gather:gather /app/apps/web/public ./apps/web/public
 # path matches what `import.meta.url` resolves to inside the standalone bundle.
 COPY --from=builder --chown=gather:gather /app/packages/db/drizzle ./packages/db/drizzle
 
-# Writable state: the generated auth secret, and uploads from Phase 3 onward.
-RUN mkdir -p /app/data && chown gather:gather /app/data
+# Writable state: the generated secrets, and uploads when STORAGE_DRIVER=local.
+# Backing this volume up, alongside the database, is backing Gather up.
+RUN mkdir -p /app/data/uploads && chown -R gather:gather /app/data
 
 COPY --chown=gather:gather docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

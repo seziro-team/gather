@@ -435,3 +435,200 @@ Entry template:
      `typescript-eslint` supports TypeScript ≥ 6.1.
 
 - **Next step (exact resume instruction):** `Start Phase 3: Client portal + real uploads — per plan.md §9.`
+
+---
+
+## 2026-09-05 — Phase 3: Client portal + real uploads
+
+- **Shipped:**
+  - **`@gather/storage`** — a driver interface with two real implementations (`local`
+    filesystem, `s3` for any S3-compatible endpoint), AES-256-GCM envelope encryption, and
+    magic-byte content sniffing. Nothing buffers a whole file: each chunk is hashed,
+    encrypted and handed to the driver before the next one is read, so a 200 MB upload
+    costs the same memory as a 200 KB one.
+  - **The client portal** — a magic link exchanged once for an HttpOnly session cookie
+    scoped by path to `/portal/<request-id>`, so no other part of Gather ever receives it
+    and a client can have two requests open at once. No account, no password, no app.
+  - **Autosave**, debounced at 700 ms per item, flushed on `pagehide` and
+    `visibilitychange` — the last two moments a phone reliably gives a page before a call
+    or a memory reclaim takes the tab.
+  - **Mobile-first checklist** with drag-drop, file picker and camera roll, a real upload
+    progress bar (`XMLHttpRequest`, because `fetch` cannot report request-body progress),
+    and per-item state.
+  - **Signed five-minute downloads**, minted when the button is clicked rather than when
+    the page is built, scoped to the portal session or the firm, and always served
+    `Content-Disposition: attachment` with `nosniff` and `default-src 'none'`.
+  - **`docker-compose.s3.yml`** — Garage v2.3.0 with a one-off init that assigns the
+    cluster layout, imports the operator's key and creates the bucket; idempotent.
+  - **`.env.example`** extended with every storage and portal variable, including the
+    explicit warning that `GATHER_ENCRYPTION_KEY` must be set by hand under
+    `STORAGE_DRIVER=s3` and that losing it loses the documents.
+  - **`e2e/portal-mobile.spec.ts`** and a `mobile-safari` Playwright project — WebKit at
+    390×844 with touch, driving the firm on a desktop context and the client on a phone.
+
+- **Real-world proof (what actually ran):** a wiped stack (`down -v`, then `up -d`), then
+  the whole suite. 12 end-to-end tests across two browser engines, 118 unit and integration
+  tests, lint, format and typecheck clean.
+
+  ```
+  Running 12 tests using 1 worker
+    ✓ [chromium]      auth.spec.ts — 5 tests
+    ✓ [chromium]      builder.spec.ts — 4 tests
+    ✓ [mobile-safari] ① a client uploads a real PDF and a phone photo, on a phone,
+                        with no account                                          (1.4m)
+    ✓ [mobile-safari] ② an answer typed and abandoned mid-way survives the tab
+                        being closed                                             (1.1m)
+    ✓ [mobile-safari] ⑤ nothing scoped to one request can reach another request's
+                        file                                                     (1.6m)
+    12 passed (5.2m)
+  ```
+
+  **① Real documents, on a real phone viewport.** The fixtures are the actual IRS Form W-9
+  (6 pages, 140,815 bytes, downloaded from irs.gov) and a 3024×4032 JPEG carrying iPhone
+  EXIF. The test asserts no password field exists anywhere on the page, no horizontal
+  overflow at 390 px, and that every control a finger lands on clears 44 px.
+
+  **③ The bytes at rest are not documents.** Read from inside the container, not through
+  the app:
+
+  ```
+  /app/data/uploads/2164b3a4-…/29746433-….bin
+    be 78 f8 b9 1f 48 33 a0 30 6e 16 c9 3e df dd 92
+  /app/data/uploads/0b6a7471-…/750c083e-….bin
+    20 d5 6a 3a 0e 29 70 37 a4 a7 df a4 3a d5 05 2f
+  objects whose first bytes are %PDF-: 0 of 3
+
+     original_name   |      mime       |  size  | encrypted | driver |      sha256      | scan
+  -------------------+-----------------+--------+-----------+--------+------------------+------
+   irs-form-w9.pdf   | application/pdf | 140815 | t         | local  | 2d420cbb4123dcf1 | skipped
+   receipt-photo.jpg | image/jpeg      | 243549 | t         | local  | 17d04952095f6845 | skipped
+   irs-form-w9.pdf   | application/pdf | 140815 | t         | local  | 2d420cbb4123dcf1 | skipped
+  ```
+
+  `2d420cbb4123dcf1…` is the SHA-256 of the fixture on disk before it was ever uploaded.
+  The test downloads the file back through the real signed-URL path and asserts the hash
+  matches and the first five bytes are `%PDF-`. The MIME column is sniffed from the bytes,
+  never the browser's claim. `scan_status = skipped` is honest rather than silent: no
+  antivirus is configured, and the UI says so (plan.md §4.3).
+
+  **④ The identical suite against a real object store.** Garage v2.3.0, brought up by the
+  overlay file, provisioned by `garage-init`, with Gather on `STORAGE_DRIVER=s3`:
+
+  ```
+  garage-init: ready — bucket 'gather' is writable by GK988e30bd319ffed297af0be0
+  3 passed (4.3m)          ← the same three mobile tests, unchanged
+
+  ==== BUCKET INFORMATION ====
+  Size:            525.2 kB (512.9 KiB)
+  Objects:         3
+  Permissions  Access key                  Local aliases
+  RW           GK988e30bd319ffed297af0be0  gather-app
+
+   storage_driver | count |   sum
+  ----------------+-------+---------
+   local          |    15 | 2625895
+   s3             |     3 |  525179
+  ```
+
+  525,179 bytes is exactly 140815 + 243549 + 140815 — GCM is a stream mode, so ciphertext
+  is the same length as plaintext, and the object store holds precisely what was sent.
+
+  **⑤ Cross-request access, attacked four ways.** The interesting one is the last: the firm
+  mints a *genuinely valid* download signature for request B's file from B's own page, then
+  the test points it at request A. The signature verifies — it is scoped to the firm, not to
+  the request — and the route still refuses, because the `file → response → item → section →
+  request` join finds nothing. It returns **404**, not 403, so nothing confirms the id even
+  exists.
+
+  ```
+  A's session on B's portal page          → 302 to /portal/unavailable
+  A's session uploading into B's request  → 401
+  unsigned request for B's file           → 403  (refused before any lookup)
+  valid firm signature, aimed at A        → 404  ← the database join, doing the work
+  same signature, aimed at B              → 200, sha256 matches
+  ```
+
+  **The audit trail, from the whole run:**
+
+  ```
+          action        | count
+  ----------------------+-------
+   portal.file_uploaded |     3
+   portal.opened        |     4
+   request.link_issued  |     4
+
+  $ pnpm verify:audit
+  OK: 101 events, chain intact (head c411843d905e…)          exit=0
+  ```
+
+- **Decisions & why:**
+  - **Encryption forces uploads through the app, and that is the right trade.** plan.md
+    §4.2 committed to this; building it confirmed it. We cannot encrypt bytes we never see,
+    so browser-direct presigned PUT is unavailable while `STORAGE_ENCRYPTION=on`. These are
+    tax documents and 16 CFR 314.4(c)(3) requires encryption at rest whatever the backend.
+    `STORAGE_ENCRYPTION=off` remains for anyone who prefers throughput.
+  - **The portal cookie is path-scoped, not site-scoped.** Two consequences, both wanted: a
+    client with two open requests can work on both in one browser, and the firm's dashboard,
+    the auth endpoints and every API route are outside its path, so a portal session cannot
+    be replayed anywhere it was not issued for.
+  - **The magic link is exchanged for a session and then redirected away.** The token
+    appears in exactly one request and never again — not in the address bar of the page the
+    client sits on for ten minutes, not in a screenshot they send their accountant, and not
+    in the `Referer` of anything the page loads.
+  - **Downloads are signed at click time.** Rendering a link into the page would mean the
+    five-minute expiry had already been running for however long the tab was open.
+  - **`garage-init` runs Garage's own binary on Alpine.** The published image is distroless
+    — `/garage` and nothing else, not even `/bin/sh` — so neither a shell script nor a
+    `CMD-SHELL` healthcheck can run in it. The binary is copied byte-for-byte rather than
+    rebuilt, and the healthcheck is `['CMD', '/garage', 'status']`.
+  - **Uploads are streamed, not chunked.** Recorded as a deviation in plan.md §9.
+
+- **Deviations from plan:** five, all written into `plan.md` §9 — the IRS Form W-9 fixture
+  instead of a 2.1 MB W-2; a compose **overlay** rather than a `--profile` for S3 (a profile
+  can add a service but cannot change `web`'s environment); no chunked uploads; the
+  `mobile-safari` viewport pinned to 390×844 rather than the device profile's 390×664; and
+  the test-database correction below.
+
+  Also worth recording: **three real bugs were found by writing these tests, not by
+  reading the code.**
+  1. The firm's request page **500'd on any request with a file on it**. It is a Server
+     Component and imported `formatBytes` from a `'use client'` module; Next refuses to call
+     a function exported from a client module on the server, and the failure only appears at
+     render time on a page that happens to have data in it. `formatBytes` now lives in
+     `apps/web/src/lib/format.ts`, which has no directive.
+  2. The Playwright `baseURL` was `127.0.0.1` while the app calls itself `localhost`. Those
+     are different cookie hosts, so the portal cookie was set on one and never sent to the
+     other. That is not a test artefact — it is exactly what a self-hoster gets wrong when
+     `GATHER_APP_URL` does not match the address people actually use, and the config now
+     says so.
+  3. The 44 px tap-target assertion caught the `sr-only` file input, which is 1 px by
+     design and which nobody taps. The assertion now excludes `.sr-only` and requires a
+     minimum control count, so it cannot pass by matching nothing.
+
+- **Known issues:**
+  1. **`pnpm test` used to be able to destroy a live install.** The database integration
+     tests fall back through `TEST_DATABASE_URL` → `DATABASE_URL`, and they delete rows and
+     disable the audit trigger. On a self-hosted clone whose `.env` points at the real
+     database, running the suite wiped the audit log. Found by doing it. They now resolve a
+     scratch `<db>_test` database, create it if absent, and can never touch the database in
+     `DATABASE_URL` — but anyone who ran `pnpm test` on a Phase 1 or 2 checkout should
+     assume their local data is gone.
+  2. **Uploads cannot resume.** A dropped connection means starting that file again. See
+     the deviation note; revisit on a real report.
+  3. **No virus scanning yet** — every file is `scan_status = skipped`, surfaced in the UI
+     as "Not scanned" with an explanation. ClamAV is Phase 6.
+  4. **A revoked or expired link cannot be re-sent from the portal side**, and there is
+     still no email: the firm copies the link and sends it however it already talks to the
+     client. Phase 4 puts a real email around it.
+  5. **`removeFileAction` deletes the row and audits it, then removes the object
+     best-effort.** A bucket that refuses the delete leaves an orphan object with no row.
+     The audit event survives either way; a sweeper for orphans belongs with the retention
+     job in Phase 6.
+  6. **The mobile suite takes ~5 minutes** because each test drives two devices through a
+     full sign-up and TOTP enrolment before it starts. Fine now; worth a shared
+     authenticated state if it grows.
+  7. Carried over: `auth.sign_up` still has a NULL `firm_id`; item drag cannot cross
+     sections; "save as template" always creates a new one; no pagination; Dependabot #4
+     (TypeScript 5.9 → 6.0.3) still must not be merged.
+
+- **Next step (exact resume instruction):** `Start Phase 4: Reminder engine — per plan.md §9.`

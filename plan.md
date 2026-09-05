@@ -1,7 +1,7 @@
 # Gather — Build Plan
 
-**Status:** Phases 1 and 2 shipped (foundation; request builder and built-in templates).
-Phase 3 is next.
+**Status:** Phases 1–3 shipped (foundation; request builder and built-in templates; client
+portal with encrypted uploads). Phase 4 is next.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -709,13 +709,45 @@ DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 
 ---
 
-### Phase 3 — Client portal + real uploads
+### Phase 3 — Client portal + real uploads ✅ **shipped**
 **Goal:** the moment of truth — a real person on a real phone uploads a real document, encrypted.
 
 Tasks: token issue/verify → scoped session; mobile-first checklist UI; autosave (debounced,
 per-item, with visible state); drag-drop + file picker + camera; upload pipeline (streamed,
 magic-byte sniff, size cap, SHA-256, AES-256-GCM envelope encryption); `local` + `s3` drivers;
 Garage compose profile; signed short-lived downloads; progress bar; resumable-friendly chunking.
+
+> **Deviation (P3).** The end-to-end fixture is the real **IRS Form W-9** (6 pages,
+> 140,815 bytes) rather than the `real-w2.pdf` named in the demo script below. The 2026
+> Form W-2 is 2.1 MB — fifteen times the size — and nothing in the test depends on which
+> form it is. Provenance for every fixture is recorded in `e2e/fixtures/README.md`.
+>
+> **Deviation (P3).** `docker-compose.s3.yml` is a compose **overlay file** rather than the
+> `--profile s3` named in the demo script. The S3 path has to change `web`'s environment,
+> not just add a service, and a profile cannot do that. The Garage container also needs a
+> one-off `garage-init` step — a fresh node serves errors until a cluster layout is applied
+> — which runs Garage's own binary on a base that has a shell, because the published image
+> is distroless.
+>
+> **Deviation (P3).** Uploads are **not chunked**. The plan said "resumable-friendly
+> chunking"; the request body is streamed straight into the encryption pipeline instead, so
+> a 200 MB upload costs the same memory as a 200 KB one. Chunking would only buy resumption,
+> and resumption needs server-side state per partial upload plus a client that tracks
+> offsets — for files that are almost always under 25 MB, over a connection that either
+> works or does not. `XMLHttpRequest` gives a real progress bar without any of it. Revisit
+> if anyone reports a real failure on a real connection.
+>
+> **Deviation (P3).** The `mobile-safari` Playwright project pins the viewport to 390×844
+> rather than taking it from the `iPhone 14` device profile, whose 390×664 models the screen
+> with browser chrome subtracted. The acceptance criterion names 390×844, so that is what
+> is asserted.
+>
+> **Correction (P3).** The database integration tests used to fall back to `DATABASE_URL`
+> when `TEST_DATABASE_URL` was unset — and they delete rows and disable the audit trigger.
+> On a self-hosted install, whose `.env` points `DATABASE_URL` at the live database, running
+> `pnpm test` would silently destroy the audit log the product exists to keep. They now
+> resolve a scratch `<db>_test` database and create it if needed, and can never touch the
+> database in `DATABASE_URL`. This was found by it happening.
 
 **Acceptance:** ① Open a portal link on a 390×844 viewport, upload a real multi-page PDF and a
 phone photo — no horizontal scroll, no zoom, no login. ② Type into a text item, kill the tab
@@ -726,16 +758,33 @@ file.
 
 **Demo script:**
 ```bash
-# local driver
-curl -sS -F file=@fixtures/real-w2.pdf "$PORTAL/api/upload?item=$ITEM" -b "$COOKIE"
-docker compose exec -T web sh -c 'file /data/uploads/**/*.bin | head'   # "data", not "PDF document"
-curl -sS "$PORTAL/api/file/$FILE_ID" -b "$COOKIE" -o out.pdf
-sha256sum fixtures/real-w2.pdf out.pdf                                   # identical
-# s3 driver
-docker compose --profile s3 up -d garage
-STORAGE_DRIVER=s3 docker compose up -d web && <repeat above>
-docker compose exec -T garage /garage bucket info gather                 # object present
-pnpm test:e2e -- portal-mobile.spec.ts --project=mobile-safari
+# ① ② ③ ⑤ — driven through the real UI, on WebKit at 390×844
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+pnpm exec playwright test --project=mobile-safari
+
+# ③ what is actually on the disk is not a document
+docker compose exec -T web sh -lc '
+  for f in $(find /app/data/uploads -type f | head -2); do
+    printf "%s\n  " "$f"; head -c 16 "$f" | od -An -tx1; done
+  n=0; for f in $(find /app/data/uploads -type f); do
+    head -c 5 "$f" | grep -q "%PDF-" && n=$((n+1)); done
+  echo "objects beginning %PDF-: $n of $(find /app/data/uploads -type f | wc -l)"'
+
+docker compose exec -T db psql -U gather -c "
+  select original_name, mime, size, encrypted, storage_driver, left(sha256,16), scan_status
+  from file order by uploaded_at;"      # sha256 is of the plaintext, and matches the fixture
+
+# ④ the identical suite against a real S3-compatible object store
+docker compose -f docker-compose.yml -f docker-compose.s3.yml -f docker-compose.test.yml \
+  up -d --build                          # garage-init creates the bucket and imports the key
+pnpm exec playwright test --project=mobile-safari
+docker run --rm --network container:gather-garage-1 \
+  -v gather_garage-meta:/var/lib/garage/meta \
+  -v "$PWD/docker/garage.toml:/etc/garage.toml:ro" \
+  -e GARAGE_RPC_SECRET="$(grep ^GARAGE_RPC_SECRET= .env | cut -d= -f2)" \
+  --entrypoint garage gather/garage-init:local bucket info gather   # objects present
+
+DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 ```
 
 ---
@@ -905,4 +954,5 @@ Each phase is designed to start from a cleared context. Read `CLAUDE.md`, then t
 
 - ~~**Phase 1:** `Start Phase 1: Foundation, schema, auth, CI — per plan.md §9.`~~ — shipped.
 - ~~**Phase 2:** `Start Phase 2: Request builder + real templates — per plan.md §9.`~~ — shipped.
-- **Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`
+- ~~**Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`~~ — shipped.
+- **Phase 4:** `Start Phase 4: Reminder engine — per plan.md §9.`

@@ -40,6 +40,23 @@ export {
 } from './env.js';
 
 export {
+  DOWNLOAD_LINK_SECONDS,
+  expiryIn,
+  signDownload,
+  verifyDownload,
+  type DownloadCheck,
+  type DownloadGrant,
+} from './signing.js';
+
+export {
+  describeValue,
+  isAnswered,
+  parseResponseValue,
+  ResponseValueError,
+  type ResponseValue,
+} from './response.js';
+
+export {
   countItems,
   instantiateBody,
   parseTemplateBody,

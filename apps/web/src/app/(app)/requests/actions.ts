@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { parseTemplateBody, TemplateBodyError, type TemplateBody } from '@gather/core';
 import { readRequestStructure, getDb } from '@gather/db';
 import { currentActor } from '@/lib/actor';
+import { downloadQuery, firmScope, signFileDownload } from '@/lib/files';
+import { issuePortalLink, revokePortalLink } from '@/lib/portal';
 import {
   createRequest,
   deleteRequest,
@@ -16,6 +18,7 @@ import {
 import { saveRequestAsTemplate } from '@/lib/templates';
 import type { FormState } from '@/lib/form-state';
 import type { SaveStructureResult } from './structure-result';
+import type { FirmDownloadResult, LinkActionResult, NewLinkResult } from './share-result';
 
 /** An empty date input posts an empty string; treat that as "no due date". */
 const optionalDate = z
@@ -138,6 +141,68 @@ export async function saveRequestStructureAction(
   revalidatePath(`/requests/${requestId}`);
   revalidatePath(`/requests/${requestId}/edit`);
   return { ok: true, body: saved };
+}
+
+/**
+ * Create a portal link and hand it back once.
+ *
+ * Only the hash is stored, so this is genuinely the only moment the link exists in a form
+ * anyone can copy. The UI says as much rather than offering a "show again" button that
+ * would have to be a lie.
+ */
+export async function createPortalLinkAction(requestId: string): Promise<NewLinkResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  try {
+    const link = await issuePortalLink(actor, requestId);
+    revalidatePath(`/requests/${requestId}`);
+    revalidatePath('/requests');
+    return { ok: true, url: link.url, expiresAt: link.expiresAt.toISOString() };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+export async function revokePortalLinkAction(
+  requestId: string,
+  tokenId: string,
+): Promise<LinkActionResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(tokenId).success) {
+    return { ok: false, error: 'That link could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  try {
+    await revokePortalLink(actor, requestId, tokenId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  return { ok: true };
+}
+
+/** Signed at the moment of the click, so a five-minute link is genuinely five minutes old. */
+export async function firmDownloadLinkAction(
+  requestId: string,
+  fileId: string,
+): Promise<FirmDownloadResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(fileId).success) {
+    return { ok: false, error: 'That file could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  const owned = await getRequest(actor.firmId, requestId);
+  if (!owned) return { ok: false, error: 'Request not found.' };
+
+  const signed = signFileDownload(fileId, firmScope(actor.firmId));
+  return {
+    ok: true,
+    url: `/api/file/${fileId}?request=${requestId}&${downloadQuery(signed)}`,
+  };
 }
 
 export async function deleteRequestAction(formData: FormData): Promise<void> {
