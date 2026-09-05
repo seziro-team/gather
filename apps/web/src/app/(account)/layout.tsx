@@ -1,4 +1,5 @@
 import { AppShell } from '@/components/app-shell';
+import { cloudEnabled, isPlatformAdmin } from '@/lib/cloud';
 import { requireMembership } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,12 @@ export const dynamic = 'force-dynamic';
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
   const { user, membership } = await requireMembership();
   return (
-    <AppShell firmName={membership.firm.name} email={user.email}>
+    <AppShell
+      firmName={membership.firm.name}
+      email={user.email}
+      cloud={cloudEnabled()}
+      platformAdmin={isPlatformAdmin(user.email)}
+    >
       {children}
     </AppShell>
   );

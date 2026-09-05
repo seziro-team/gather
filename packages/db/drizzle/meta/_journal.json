@@ -15,6 +15,41 @@
       "when": 1785230536484,
       "tag": "0001_audit_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785765821310,
+      "tag": "0002_file_storage_driver",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788597909482,
+      "tag": "0003_reminder_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788606515659,
+      "tag": "0004_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788606990768,
+      "tag": "0005_file_purged_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788612212271,
+      "tag": "0006_cloud",
+      "breakpoints": true
     }
   ]
 }

@@ -84,3 +84,49 @@ export async function saveChecklist(page: Page): Promise<void> {
   await page.getByTestId('save').click();
   await expect(page.getByTestId('save-status')).toContainText('Saved at');
 }
+
+/**
+ * Builds a one-section checklist out of the item types named, labelling each one, and
+ * saves it. Returns nothing — the caller already has the request id from `newRequest`.
+ *
+ * `types` are the builder's own button labels ("File upload", "Short text", …), so this
+ * fails loudly if a type is ever renamed rather than silently building a shorter list.
+ */
+export async function buildChecklist(
+  page: Page,
+  section: string,
+  items: { type: string; label: string }[],
+): Promise<void> {
+  await page.getByTestId('add-section').click();
+  await page.getByTestId('section-title').fill(section);
+
+  for (const item of items) {
+    await page.getByRole('button', { name: `+ ${item.type}` }).click();
+  }
+  await expect(page.getByTestId('item')).toHaveCount(items.length);
+
+  const labels = page.getByLabel('What are you asking for?');
+  for (const [index, item] of items.entries()) {
+    await labels.nth(index).fill(item.label);
+  }
+
+  await saveChecklist(page);
+}
+
+/**
+ * Issues a portal link from the firm's side and returns it.
+ *
+ * The link is shown exactly once — Gather stores only its SHA-256 — so this reads it from
+ * the box it appears in rather than from anywhere it could be looked up again. That is the
+ * same constraint a real firm is under.
+ */
+export async function issuePortalLink(page: Page, requestId: string): Promise<string> {
+  await page.goto(`/requests/${requestId}`);
+  await page.getByTestId('create-link').click();
+  await expect(page.getByTestId('issued-link')).toBeVisible();
+  const url = (await page.getByTestId('portal-url').innerText()).trim();
+  if (!/\/p\/[A-Za-z0-9_-]{20,}$/.test(url)) {
+    throw new Error(`That does not look like a portal link: ${url}`);
+  }
+  return url;
+}

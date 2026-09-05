@@ -80,7 +80,176 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # GNU oath-toolkit generates the TOTP codes, standing in for an authenticator app.
+      # oathtool generates the TOTP codes, standing in for an authenticator app. `unzip`
+      # reads the download archive — deliberately a real extractor rather than the library
+      # that wrote it, because "opens on someone else's machine" is the actual claim.
+      - name: Install oathtool and unzip
+        run: sudo apt-get update && sudo apt-get install -y oathtool unzip
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `review.spec.ts` ⑤ runs `pnpm verify:audit --csv` from the *host*, not inside the
+      # container — that is the claim being tested: a firm can hand the CSV to somebody
+      # with no access to Gather and no database, and they can recompute every hash. The
+      # verifier is a compiled CLI, so this job needs it built even though everything else
+      # it tests runs in Docker.
+      #
+      # Two explicit steps rather than `--filter ...@gather/db`: that selector builds the
+      # package and its dependencies, but not in order — core and db start together and db
+      # fails against a dist/ that does not exist yet. tsc emits anyway, so the failure is
+      # quiet and the CLI it leaves behind is half-built.
+      - name: Build the audit verifier
+        run: |
+          pnpm --filter @gather/core build
+          pnpm --filter @gather/db build
+
+      # Chromium for the firm's dashboard, WebKit for the client's phone. The portal suite
+      # runs on WebKit at 390x844 because iOS Safari is what most of a small firm's clients
+      # are actually holding, and it is not Chromium with a narrower window.
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium webkit
+
+      # Builds and boots the real images the quickstart uses, not a dev server. The mail
+      # overlay adds Mailpit — a real SMTP server that catches instead of relaying — so the
+      # reminder suite proves messages over a real SMTP conversation rather than a mock.
+      - name: Start Gather
+        run: |
+          cp .env.example .env
+          # Any whsec_<base64> value works: the webhook test signs its payload with this
+          # exact secret, which is the whole point of verifying a signature.
+          echo "RESEND_WEBHOOK_SECRET=whsec_$(openssl rand -base64 24)" >> .env
+          docker compose -f docker-compose.yml -f docker-compose.mail.yml \
+                         -f docker-compose.test.yml up -d --build
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
+              curl -sS http://127.0.0.1:3000/api/health; echo; exit 0
+            fi
+            sleep 2
+          done
+          echo "Gather did not become healthy"
+          docker compose -f docker-compose.yml -f docker-compose.mail.yml logs
+          exit 1
+
+      - name: Run end-to-end tests
+        run: pnpm test:e2e
+
+      # Named separately so a security regression is obvious in the checks list rather
+      # than buried in a count. Same stack; no extra services.
+      - name: Security suite
+        run: pnpm test:security
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.mail.yml logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7
+
+  s3:
+    name: End-to-end against an S3 object store
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install oathtool
+        run: sudo apt-get update && sudo apt-get install -y oathtool
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps webkit
+
+      # plan.md §9 Phase 3 acceptance ④: the same portal tests, unchanged, against a real
+      # S3-compatible endpoint rather than the local filesystem. The credentials are
+      # generated here and thrown away with the runner — Garage is told to accept exactly
+      # these, so there is nothing to configure and nothing to leak.
+      - name: Start Gather on Garage
+        run: |
+          cp .env.example .env
+          RPC_SECRET="$(openssl rand -hex 32)"
+          {
+            echo "S3_BUCKET=gather"
+            echo "S3_ACCESS_KEY_ID=GK$(openssl rand -hex 12)"
+            echo "S3_SECRET_ACCESS_KEY=$(openssl rand -hex 32)"
+            echo "GARAGE_RPC_SECRET=$RPC_SECRET"
+            # Required explicitly under STORAGE_DRIVER=s3: Gather refuses to generate a key
+            # it cannot store beside the objects it protects.
+            echo "GATHER_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+          } >> .env
+          # Carried to the later step directly rather than grepped back out of .env, which
+          # now holds the empty placeholder from .env.example *and* this value.
+          echo "GARAGE_RPC_SECRET=$RPC_SECRET" >> "$GITHUB_ENV"
+          docker compose -f docker-compose.yml -f docker-compose.s3.yml \
+                         -f docker-compose.test.yml up -d --build
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
+              curl -sS http://127.0.0.1:3000/api/health; echo; exit 0
+            fi
+            sleep 2
+          done
+          echo "Gather did not become healthy"
+          docker compose -f docker-compose.yml -f docker-compose.s3.yml logs
+          exit 1
+
+      - name: Run the portal suite against S3
+        run: pnpm exec playwright test --project=mobile-safari
+
+      # Proof the objects are in the bucket and not quietly on a disk somewhere.
+      - name: Show what landed in the bucket
+        run: |
+          docker run --rm --network container:gather-garage-1 \
+            -v gather_garage-meta:/var/lib/garage/meta \
+            -v "$PWD/docker/garage.toml:/etc/garage.toml:ro" \
+            -e GARAGE_RPC_SECRET="$GARAGE_RPC_SECRET" \
+            --entrypoint garage gather/garage-init:local bucket info gather
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.s3.yml logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts-s3
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7
+
+  cloud:
+    name: The hosted tier
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
       - name: Install oathtool
         run: sudo apt-get update && sudo apt-get install -y oathtool
 
@@ -96,33 +265,96 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
 
-      # Builds and boots the real image the quickstart uses, not a dev server.
-      - name: Start Gather
+      # plan.md §9 Phase 7. Its own job because it needs GATHER_CLOUD=true, which the
+      # default stack deliberately does not have — team.spec.ts ④ asserts that a
+      # self-hosted install has no billing page and no operator console at all.
+      #
+      # The Stripe credentials in docker-compose.cloud.yml are placeholders, not keys.
+      # Everything runs except Stripe: the third test asserts that Subscribe reaches
+      # Stripe and that the refusal is shown to the user, which is what distinguishes a
+      # wired button from a dead one. Real checkout is docs/stripe-verification.md.
+      - name: Start Gather Cloud
         run: |
           cp .env.example .env
-          docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+          echo "GATHER_ADMIN_EMAILS=@seziro.test" >> .env
 
-      - name: Wait for health
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
-              curl -sS http://127.0.0.1:3000/api/health; echo; exit 0
-            fi
-            sleep 2
-          done
-          echo "Gather did not become healthy"; docker compose logs; exit 1
-
-      - name: Run end-to-end tests
-        run: pnpm test:e2e
+      - name: Run the cloud suite
+        run: pnpm test:cloud
 
       - name: Container logs on failure
         if: failure()
-        run: docker compose logs --no-color
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.mail.yml \
+                         -f docker-compose.test.yml -f docker-compose.cloud.yml \
+                         logs --no-color
 
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-cloud
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7
+
+  antivirus:
+    name: Quarantine an infected upload
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install oathtool
+        run: sudo apt-get update && sudo apt-get install -y oathtool
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # plan.md §9 Phase 6 acceptance ④. Its own job because ClamAV wants 3–4 GiB of RAM
+      # and downloads a ~350 MB signature database before clamd will answer — which is
+      # exactly why it is opt-in for a self-hoster too.
+      - name: Start Gather with ClamAV
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+                         -f docker-compose.test.yml up -d --build
+
+      - name: Wait for clamd and for Gather
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
+              docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+                exec -T clamav clamdscan --version
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Gather did not become healthy"
+          docker compose -f docker-compose.yml -f docker-compose.antivirus.yml logs
+          exit 1
+
+      - name: Quarantine an EICAR upload
+        run: pnpm test:antivirus
+        env:
+          GATHER_TEST_ANTIVIRUS: '1'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.antivirus.yml logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts-antivirus
           path: |
             artifacts/
             playwright-report/

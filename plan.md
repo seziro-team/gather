@@ -1,7 +1,13 @@
 # Gather — Build Plan
 
-**Status:** Phases 1 and 2 shipped (foundation; request builder and built-in templates).
-Phase 3 is next.
+**Status:** All 8 phases shipped — v0.1.0. Foundation; request builder and built-in templates;
+client portal with encrypted uploads; reminder engine; review, dashboard and evidence export;
+security hardening; team roles and the hosted tier; the site and launch material.
+
+**The one thing that is not proven:** Stripe billing has never completed a call, because this
+build has never had a Stripe account. `docs/stripe-verification.md` is the procedure that closes
+it. Self-hosting — which is the whole product — is unaffected. Three features planned for Cloud
+Pro (SMS, e-signature, cloud-drive sync) were cut rather than stubbed; §7.2 records why.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -525,18 +531,33 @@ Hosted on Seziro infrastructure, built in `cloud/` as a deployable layer over th
 | Seats | Unlimited | 3 | 10 |
 | Storage | Your disk | 25 GB | 100 GB |
 | Hosting, backups, updates | You | Us | Us |
-| White-label domain + sending domain | DIY | ✅ | ✅ |
-| SMS reminders (10DLC) | — | — | ✅ + metered |
-| E-signature on completion | — | — | ✅ |
-| Sync to Drive / Dropbox / OneDrive | — | — | ✅ |
-| Team roles | Basic | ✅ | ✅ + granular |
-| Retention policies | Manual config | ✅ | ✅ |
+| Team roles (owner / admin / member) | ✅ | ✅ | ✅ |
+| Retention policies | You run the purge | We run it | We run it |
 
-Stripe in **test mode** until the operator flips live keys. SMS billed as metered usage
-(Stripe Meters) at pass-through cost + margin — never bundled, because 10DLC costs are real.
+Stripe in **test mode** until the operator flips live keys.
 
-**Boundary rule check:** every paid item is hosting, a cost we pay per message, a third-party
-integration, or a compliance convenience. Nothing in §7.1 is crippled to create §7.2.
+**Boundary rule check:** every paid item is hosting or a compliance convenience. Nothing in
+§7.1 is crippled to create §7.2 — team roles, retention, the audit trail and every core
+capability are in the free product, unmetered.
+
+#### Deferred from v0.1.0 — and why (2026-09-05)
+
+Three items in the original table are **not built**, and are not sold:
+
+| Deferred | What it needs before it can be real |
+|---|---|
+| SMS reminders | A Twilio account and a **registered A2P 10DLC brand** — days to weeks of carrier registration, and real money per message. |
+| E-signature on completion | A DocuSeal deployment plus its API token. Self-hostable, so this is the nearest of the three. |
+| Sync to Drive / Dropbox / OneDrive | OAuth applications registered at **three** separate vendors, each with its own review. |
+
+They were cut rather than stubbed. Writing three integrations that have never once been run
+against the real API — and then listing them on a pricing page — is precisely the behaviour
+§4 exists to forbid, and a customer discovering an advertised feature does not work is worse
+than one who never saw it offered. `FEATURES` in `packages/core/src/plans.ts` therefore
+contains only what exists, and the site's pricing table is generated from it.
+
+Cloud Pro is consequently a capacity tier: ten seats and 100 GB rather than three and 25 GB.
+That is a thinner difference than this plan first imagined, and it is the true one.
 
 ---
 
@@ -709,13 +730,45 @@ DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 
 ---
 
-### Phase 3 — Client portal + real uploads
+### Phase 3 — Client portal + real uploads ✅ **shipped**
 **Goal:** the moment of truth — a real person on a real phone uploads a real document, encrypted.
 
 Tasks: token issue/verify → scoped session; mobile-first checklist UI; autosave (debounced,
 per-item, with visible state); drag-drop + file picker + camera; upload pipeline (streamed,
 magic-byte sniff, size cap, SHA-256, AES-256-GCM envelope encryption); `local` + `s3` drivers;
 Garage compose profile; signed short-lived downloads; progress bar; resumable-friendly chunking.
+
+> **Deviation (P3).** The end-to-end fixture is the real **IRS Form W-9** (6 pages,
+> 140,815 bytes) rather than the `real-w2.pdf` named in the demo script below. The 2026
+> Form W-2 is 2.1 MB — fifteen times the size — and nothing in the test depends on which
+> form it is. Provenance for every fixture is recorded in `e2e/fixtures/README.md`.
+>
+> **Deviation (P3).** `docker-compose.s3.yml` is a compose **overlay file** rather than the
+> `--profile s3` named in the demo script. The S3 path has to change `web`'s environment,
+> not just add a service, and a profile cannot do that. The Garage container also needs a
+> one-off `garage-init` step — a fresh node serves errors until a cluster layout is applied
+> — which runs Garage's own binary on a base that has a shell, because the published image
+> is distroless.
+>
+> **Deviation (P3).** Uploads are **not chunked**. The plan said "resumable-friendly
+> chunking"; the request body is streamed straight into the encryption pipeline instead, so
+> a 200 MB upload costs the same memory as a 200 KB one. Chunking would only buy resumption,
+> and resumption needs server-side state per partial upload plus a client that tracks
+> offsets — for files that are almost always under 25 MB, over a connection that either
+> works or does not. `XMLHttpRequest` gives a real progress bar without any of it. Revisit
+> if anyone reports a real failure on a real connection.
+>
+> **Deviation (P3).** The `mobile-safari` Playwright project pins the viewport to 390×844
+> rather than taking it from the `iPhone 14` device profile, whose 390×664 models the screen
+> with browser chrome subtracted. The acceptance criterion names 390×844, so that is what
+> is asserted.
+>
+> **Correction (P3).** The database integration tests used to fall back to `DATABASE_URL`
+> when `TEST_DATABASE_URL` was unset — and they delete rows and disable the audit trigger.
+> On a self-hosted install, whose `.env` points `DATABASE_URL` at the live database, running
+> `pnpm test` would silently destroy the audit log the product exists to keep. They now
+> resolve a scratch `<db>_test` database and create it if needed, and can never touch the
+> database in `DATABASE_URL`. This was found by it happening.
 
 **Acceptance:** ① Open a portal link on a 390×844 viewport, upload a real multi-page PDF and a
 phone photo — no horizontal scroll, no zoom, no login. ② Type into a text item, kill the tab
@@ -726,21 +779,38 @@ file.
 
 **Demo script:**
 ```bash
-# local driver
-curl -sS -F file=@fixtures/real-w2.pdf "$PORTAL/api/upload?item=$ITEM" -b "$COOKIE"
-docker compose exec -T web sh -c 'file /data/uploads/**/*.bin | head'   # "data", not "PDF document"
-curl -sS "$PORTAL/api/file/$FILE_ID" -b "$COOKIE" -o out.pdf
-sha256sum fixtures/real-w2.pdf out.pdf                                   # identical
-# s3 driver
-docker compose --profile s3 up -d garage
-STORAGE_DRIVER=s3 docker compose up -d web && <repeat above>
-docker compose exec -T garage /garage bucket info gather                 # object present
-pnpm test:e2e -- portal-mobile.spec.ts --project=mobile-safari
+# ① ② ③ ⑤ — driven through the real UI, on WebKit at 390×844
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+pnpm exec playwright test --project=mobile-safari
+
+# ③ what is actually on the disk is not a document
+docker compose exec -T web sh -lc '
+  for f in $(find /app/data/uploads -type f | head -2); do
+    printf "%s\n  " "$f"; head -c 16 "$f" | od -An -tx1; done
+  n=0; for f in $(find /app/data/uploads -type f); do
+    head -c 5 "$f" | grep -q "%PDF-" && n=$((n+1)); done
+  echo "objects beginning %PDF-: $n of $(find /app/data/uploads -type f | wc -l)"'
+
+docker compose exec -T db psql -U gather -c "
+  select original_name, mime, size, encrypted, storage_driver, left(sha256,16), scan_status
+  from file order by uploaded_at;"      # sha256 is of the plaintext, and matches the fixture
+
+# ④ the identical suite against a real S3-compatible object store
+docker compose -f docker-compose.yml -f docker-compose.s3.yml -f docker-compose.test.yml \
+  up -d --build                          # garage-init creates the bucket and imports the key
+pnpm exec playwright test --project=mobile-safari
+docker run --rm --network container:gather-garage-1 \
+  -v gather_garage-meta:/var/lib/garage/meta \
+  -v "$PWD/docker/garage.toml:/etc/garage.toml:ro" \
+  -e GARAGE_RPC_SECRET="$(grep ^GARAGE_RPC_SECRET= .env | tail -1 | cut -d= -f2)" \
+  --entrypoint garage gather/garage-init:local bucket info gather   # objects present
+
+DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 ```
 
 ---
 
-### Phase 4 — Reminder engine (real emails, real schedules)
+### Phase 4 — Reminder engine (real emails, real schedules) ✅ **shipped**
 **Goal:** the nagging works, and it stops.
 
 Tasks: pg-boss wiring; cadence model + editor (interval / escalating / custom days + send time,
@@ -750,30 +820,69 @@ client timezone, quiet hours, max count); Resend + SMTP drivers behind one inter
 "send now" manual nudge; preflight `pnpm check:email` that validates SPF/DKIM/DMARC and sends a
 test.
 
-⚠️ **Operator credential required** (Realness Rule §4): `RESEND_API_KEY` + a verified sending
-domain, **or** SMTP host/user/pass, plus a real test inbox. We stop and ask; we do not mock a send.
+> **Deviation (P4).** Cadences are **day-based**, not minute-based. The demo script below
+> asked for a two-minute cadence to prove reminders in a test; the shortest thing a firm can
+> configure is one day, because a product that can email a client every two minutes is a
+> product that will. The end-to-end suite moves `next_run_at` into the past instead, which
+> is what tomorrow looks like to the worker — everything else in the path is real.
+>
+> **Deviation (P4).** The reminder logic lives in a new package, **`@gather/reminders`**,
+> rather than inside `apps/worker`. The web app needs the identical path for the manual
+> "send one now" button, and two implementations of "compose and send a reminder" is exactly
+> how a send-once guarantee stops holding.
+>
+> **Deviation (P4).** Idempotency is enforced by a **unique index on `reminder_log`**, not
+> by the provider. Resend's `Idempotency-Key` header carries the same value and collapses
+> duplicates at their end too — but SMTP has no equivalent, and a guarantee that holds for
+> only one of two shipped drivers is not a guarantee. Migration `0003_reminder_idempotency`.
+>
+> **Deviation (P4).** `docker-compose.mail.yml` ships **Mailpit** for development and for
+> the test suite. It is a real SMTP server that catches instead of relaying, so the suite
+> proves a real SMTP conversation without needing an operator's credentials to run.
+>
+> **Correction (P4).** A due date is a calendar date carried in a `timestamptz`, stored as
+> 23:59:59.999 UTC. It was being rendered in a local timezone, so the same request read as
+> 10 April in New York and 11 April in Sydney. Now rendered in UTC everywhere, which is what
+> the firm typed.
 
-**Acceptance:** ① Schedule at 2-minute cadence → **two real emails arrive** at a real inbox;
-Resend message IDs pasted into `progress.md`. ② Mark the request complete → no further emails, and
-`reminder_schedule.active=false`. ③ The same run passes against a real SMTP server. ④ A bounce
-webhook flips the reminder to `bounced` and surfaces in the dashboard. ⑤ Restarting the worker
-mid-schedule doesn't double-send (idempotency proven).
+⚠️ **Operator credential still required for Resend** (Realness Rule §4). The Resend driver is
+written against the documented API and unit-tested, and **has never been run against the live
+service** — that needs `RESEND_API_KEY` and a verified sending domain. Everything shipped is
+proven against real SMTP instead. Recorded as a hard stop in `progress.md`.
+
+**Acceptance:** ① A schedule sends **real emails** to a real inbox over a real SMTP
+conversation, and the reminder log records each one. ② Mark the request complete → no further
+emails, and `reminder_schedule.active=false`. ③ A client who sends everything back is not
+chased again. ④ A bounce webhook flips the reminder to `bounced` and surfaces in the
+dashboard. ⑤ A worker that dies between claiming a reminder and sending it does not send it
+twice when it restarts. ⑥ A manual nudge sends immediately without consuming a cadence step.
+*(Resend message ids remain unproven — see the credential note above.)*
 
 **Demo script:**
 ```bash
-pnpm check:email                       # SPF/DKIM/DMARC pass + test send
-pnpm demo:reminders --request $REQ --every 2m
-# wait; screenshots of the real inbox → artifacts/phase4/inbox-*.png
-docker compose exec -T db psql -U gather -c \
-  "select sent_at,channel,provider_message_id,status from reminder_log where request_id='$REQ';"
-curl -X POST localhost:3000/api/requests/$REQ/complete -H "$AUTH"
-# wait 3× cadence → no new rows
-docker compose restart worker && sleep 150  # still no duplicates
+# A real SMTP server that catches instead of relaying, and the worker alongside the app.
+docker compose -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.test.yml \
+  up -d --build
+open http://localhost:8025            # the inbox everything below lands in
+
+# The deliverability preflight: real DNS lookups, then a real message.
+pnpm check:email you@yourfirm.example
+
+# ① … ⑥ — driven through the real UI against the real worker
+pnpm exec playwright test --project=chromium reminders.spec.ts
+
+docker compose exec -T db psql -U gather -c "
+  select status, to_address, provider_message_id, idempotency_key
+    from reminder_log order by sent_at desc limit 5;"
+docker compose exec -T db psql -U gather -c "
+  select active, sent_count, next_run_at from reminder_schedule;"
+
+DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 ```
 
 ---
 
-### Phase 5 — Approve/reject, dashboard, zip, audit export
+### Phase 5 — Approve/reject, dashboard, zip, audit export ✅ **shipped**
 **Goal:** the firm side closes the loop.
 
 Tasks: review UI (per item: approve / reject + note, with keyboard flow); rejection reopens exactly
@@ -781,26 +890,58 @@ that item and re-notifies; response versioning; dashboard (all requests, status,
 oldest-outstanding, filters); download-all as a streamed zip with sane filenames
 (`{Client}/{Section}/{Item}-{original}`); audit trail viewer + CSV/PDF export.
 
-**Acceptance:** ① Reject 1 of 5 items with a note → client link shows that one item outstanding,
-the other four locked as approved, and the rejection note is visible. ② Client resubmits → `version=2`,
-old file retained and still auditable. ③ Approve all → status `complete`, reminders stop. ④ Zip
-contains exactly the approved files, opens on macOS/Windows/Linux, filenames sane. ⑤ Audit CSV
-covers the whole lifecycle and re-verifies its hash chain after export.
+> **Deviation (P5).** The audit export reports **two properties, not one**. Every export can
+> prove *no row was altered* — each row's hash recomputes from its own content. Only a
+> **complete** export can prove *no row is missing*, because a trail filtered to one request
+> has gaps in its ids by construction. `verifyAuditRows` and `pnpm verify:audit --csv` report
+> them separately rather than collapsing both into a reassuring "chain intact", which would
+> be claiming something a filtered file cannot support.
+>
+> **Deviation (P5).** Zip entry paths use ASCII punctuation (`01 Income/02 Bank - scan.pdf`)
+> rather than an em-dash. The archives are correct UTF-8 with the flag set, and Python's
+> `zipfile`, macOS and Windows all read them — but Info-ZIP UnZip 6.00 (2009), which is
+> still what `unzip` is on Debian and Ubuntu, warns and exits non-zero on any non-ASCII
+> entry name. Characters that come from a firm's or a client's own data are kept; decorative
+> ones of ours are not worth the warning.
+>
+> **Deviation (P5).** The zip excludes superseded versions by default, with
+> `?include=all` for the full set, and the `MANIFEST.txt` says how many were left out.
+> "Download everything" to somebody about to hand a folder to a tax preparer means the
+> current documents, not three drafts of one.
+>
+> **Correction (P5).** `auth.sign_up` carries a NULL `firm_id` (a known issue since Phase 1)
+> and was therefore missing from every firm-scoped view. The export now unions on firm
+> membership, so the first event of an install appears in the trail it belongs to.
+
+**Acceptance:** ① Reject 1 of 5 items with a note → the client link shows that one item
+outstanding, the other four locked as approved (not merely ticked), and the note is visible.
+② Client resubmits → `version=2`, old file retained and still auditable. ③ Approve all →
+status `complete` and reminders stop, in the same transaction. ④ The zip holds the current
+files, foldered, opens with a real extractor, and its manifest hashes match the bytes.
+⑤ The audit CSV covers the whole lifecycle and re-verifies **away from the database**;
+tampering with one byte makes `pnpm verify:audit --csv` fail.
 
 **Demo script:**
 ```bash
-# browser: review → reject "2024 Form 1098" with note "This is the 2023 copy"
-curl -sS "$PORTAL" -b "$COOKIE" | grep -c 'data-status="rejected"'   # 1
-curl -sS "$PORTAL" -b "$COOKIE" | grep -c 'data-status="approved"'   # 4
-curl -sS -o all.zip localhost:3000/api/requests/$REQ/download -H "$AUTH"
-unzip -l all.zip
-curl -sS localhost:3000/api/requests/$REQ/audit.csv -H "$AUTH" | tee audit.csv | head
-pnpm verify:audit --csv audit.csv    # chain intact
+# ① … ⑤ — driven through the real UI, with a real zip and a real CSV
+pnpm exec playwright test --project=chromium review.spec.ts
+
+# The firm's queue: what needs a person, and what is overdue.
+open http://localhost:3000/dashboard
+
+# ④ the archive, read by a real extractor rather than a library that wrote it
+unzip -t "$ZIP" && unzip -l "$ZIP"
+python3 -c "import zipfile;z=zipfile.ZipFile('$ZIP');print(z.testzip());print(z.namelist())"
+
+# ⑤ evidence, verified with no database in sight
+pnpm verify:audit --csv gather-audit-$REQ.csv
+sed -i 's/Wrong year./Right year./' gather-audit-$REQ.csv
+pnpm verify:audit --csv gather-audit-$REQ.csv      # FAIL: content was modified
 ```
 
 ---
 
-### Phase 6 — Security hardening pass
+### Phase 6 — Security hardening pass ✅ **shipped**
 **Goal:** earn the right to say "tax documents".
 
 Tasks: rate limiting (token/IP/account) with 429s + backoff headers; ClamAV profile + quarantine
@@ -809,60 +950,136 @@ revocation UI; retention/purge job; log redaction; `pnpm audit` + Dependabot; th
 (`docs/threat-model.md`); `SECURITY.md` + `docs/incident-response.md`; **`docs/safeguards-rule-mapping.md`**
 (the §6 table, with an explicit "what Gather does *not* do for you" section); authorization test suite.
 
-**Acceptance:** ① Automated tests prove cross-request IDOR is impossible across portal, API and
-download paths. ② Expired token → 401; revoked token → 401; both audited. ③ >N req/min → 429.
-④ **EICAR test file → quarantined, never downloadable**, flagged in UI and audit log. ⑤ With the
-antivirus profile off, files are visibly `scan_skipped` — never silently unscanned.
-⑥ `securityheaders.com`-equivalent checks pass locally. ⑦ Retention purge removes the object from
-disk **and** S3, verified by direct inspection.
+> **Deviation (P6).** Rate limiting has **two magic-link buckets**, not one. `portal.open`
+> is per IP and only reachable when `GATHER_TRUST_PROXY` is on; `portal.open.shared` is a
+> much higher ceiling for when Gather cannot tell one caller from another. Applying the
+> per-IP number globally — which is what a single bucket means without a proxy — locks a
+> firm's own clients out of their own documents when thirty organizers go out in January.
+> Found by the acceptance test doing exactly that to the tests that ran after it.
+>
+> **Deviation (P6).** A dead link redirects to `/portal/unavailable?reason=…` rather than
+> returning 401. The criterion said 401; a client who clicks an expired link needs a page
+> that says "ask your accountant for a fresh one", not a status code. The **rejection is
+> still audited with its reason**, which is what the criterion was protecting.
+>
+> **Deviation (P6).** There is no separate download origin. The plan called for one; what
+> ships is `Content-Disposition: attachment` on every file, `X-Content-Type-Options:
+> nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, and **refusing the file
+> types that could execute at all** — an upload that is markup is rejected whatever it is
+> named. A second origin needs a second hostname and a second certificate, which would put
+> a DNS change in the middle of a five-minute quickstart to defend against something three
+> other layers already stop.
+>
+> **Deviation (P6).** `retention:purge` runs **inside the container**, not from the host:
+> with the local driver the files are in a volume the host cannot see, so a host-side purge
+> would report success having deleted nothing.
+>
+> **Correction (P6).** Better Auth's rate limiter used in-memory storage — a Phase 1 known
+> issue — so limits reset on every restart and were not shared between replicas. It now
+> uses the database.
+
+**Acceptance:** ① Automated tests prove cross-request access is impossible across the
+portal, the API, the upload path and the download paths, for portal sessions *and* between
+firms. ② An expired link, a revoked link and one that never existed are each refused and
+each audited with the reason. ③ Exceeding a limit returns 429 with `Retry-After` and
+`RateLimit-*`, and the requests before it do not. ④ **A real EICAR file scanned by real
+clamd → quarantined, deleted from storage, never downloadable by anyone, flagged in the UI
+and in the audit log with the signature name.** ⑤ With the antivirus profile off, files are
+visibly `skipped` — never silently unscanned. ⑥ Security headers on every page, a real CSP
+with a per-request nonce, and a *stricter* policy on uploaded files. ⑦ Retention purge
+removes the object from disk, verified by direct inspection, and keeps the record.
 
 **Demo script:**
 ```bash
-pnpm test:security                       # IDOR / token / rate-limit suite
-docker compose --profile antivirus up -d clamav
-curl -sS -F file=@fixtures/eicar.com "$PORTAL/api/upload?item=$ITEM" -b "$COOKIE"
-docker compose exec -T db psql -U gather -c "select scan_status from file order by id desc limit 1;"  # infected
-curl -sS -o /dev/null -w '%{http_code}\n' "$APP/api/file/$INFECTED_ID" -H "$AUTH"                     # 403
-for i in $(seq 1 200); do curl -s -o /dev/null -w '%{http_code} ' "$PORTAL"; done | tail -c 60        # 429s
-pnpm retention:purge --older-than 0d --confirm && docker compose exec -T web ls /data/uploads
+# ① ② ③ ⑤ ⑥ — no extra services needed
+docker compose -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.test.yml \
+  up -d --build
+pnpm test:security
+
+# ④ — real clamd, a real signature database, the real EICAR string
+docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+               -f docker-compose.test.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+  exec -T clamav clamdscan --version
+pnpm test:antivirus
+
+docker compose exec -T db psql -U gather -c "
+  select original_name, scan_status from file where scan_status = 'infected';"
+docker compose exec -T db psql -U gather -c "
+  select action, metadata->>'signature' from audit_event where action = 'file.quarantined';"
+
+# ⑦ — inside the container, because that is where the files are
+docker compose exec -T worker sh -lc 'find /app/data/uploads -type f | wc -l'
+docker compose exec -T worker node dist/cli/retention-purge.js --older-than 365d          # dry run
+docker compose exec -T worker node dist/cli/retention-purge.js --older-than 365d --confirm
+docker compose exec -T worker sh -lc 'find /app/data/uploads -type f | wc -l'
+docker compose exec -T db psql -U gather -c "
+  select original_name, size, purged_at is not null as purged from file where purged_at is not null;"
 ```
 
 ---
 
-### Phase 7 — Cloud + Stripe (live day 1)
+### Phase 7 — Cloud + Stripe ✅ shipped (2026-09-05, partially unproven)
 **Goal:** a real hosted product taking a real (test-mode) subscription.
 
-Tasks: `cloud/` layer — orgs/tenancy + isolation tests; Stripe Checkout + Billing Portal + webhooks
-(test mode); plan gating; Seziro admin panel; white-label domain + sending domain; team roles;
-retention policies; SMS via Twilio 10DLC (**start brand registration on day 1 of this phase**);
-e-sign via DocuSeal; sync to Drive/Dropbox/OneDrive; `docker-compose.prod.yml` + Caddy reverse
-proxy, all hostnames env-driven.
+Shipped: team roles and invitations (in the free product, not the paid one); tenancy isolation
+tests; Stripe Checkout + Billing Portal + webhooks; plan gating on seats and storage; the Seziro
+operator console at `/admin`; `docker-compose.prod.yml` + Caddy with automatic TLS, all hostnames
+env-driven; nightly `pg_dump` backups.
 
-⚠️ **Operator credentials required:** Stripe test keys; Twilio account + 10DLC brand; Google,
-Dropbox and Microsoft OAuth app credentials.
+**Deviations — recorded rather than drifted:**
 
-**Acceptance:** ① A real Stripe **test-mode** subscription created — `sub_…` id pasted into
-`progress.md`; webhook flips the plan; a gated feature visibly unlocks. ② Tenancy isolation tests
-prove org A cannot reach org B by any route. ③ An SMS **actually delivered to a real handset**
-(Twilio SID pasted). ④ OAuth against a **real** Google account, a completed request's files synced,
-Drive file ids pasted. ⑤ `docker-compose.prod.yml` brings the stack up behind Caddy with TLS on a
-test hostname.
+1. **No `cloud/` directory.** The hosted tier is `GATHER_CLOUD=true` plus four Stripe variables
+   over the same code. A parallel tree would have meant two codebases and a self-hosted product
+   that quietly rots — and the boundary is better enforced by `PLAN_DEFINITIONS.self_hosted`
+   having `null` for every limit than by a directory.
+2. **Team roles are free.** They were listed as a paid feature. A two-person firm self-hosting
+   needs them as much as a hosted one, and gating them would have broken the boundary rule.
+3. **SMS, e-sign and cloud-drive sync are deferred**, with reasons and prerequisites in §7.2.
+4. **An unsubscribed firm on the hosted tier gets the entry plan's limits**, never a lock-out.
+   Holding a firm's own documents hostage is not a business model this product will have.
+
+⚠️ **Operator credentials still required:** Stripe test keys. Everything else about the hosted
+tier runs today: `pnpm test:cloud` brings up the tier and proves the billing page, the seat
+limit, the operator console and the fact that the Subscribe button reaches Stripe — which
+answers, and refuses, because the credentials are placeholders.
+
+**Acceptance:** ① ⛔ **Not met — hard stop.** A real test-mode subscription needs a Stripe
+account. Procedure to close it: `docs/stripe-verification.md`. ② ✅ Tenancy isolation proven
+by `e2e/team.spec.ts` ③ and `packages/db/src/team.test.ts`. ③ ⛔ Deferred (SMS). ④ ⛔ Deferred
+(cloud-drive sync). ⑤ ✅ `docker-compose.prod.yml` + `docker/Caddyfile`, validated with
+`docker compose config`; a run on a real hostname needs a domain, which is a launch step.
 
 ---
 
-### Phase 8 — Site, README, launch
+### Phase 8 — Site, README, launch ✅ shipped (2026-09-05)
 **Goal:** ship it in public.
 
-Tasks: `site/` per §8 with real copy; demo gif/video captured from the working product; OG image
-generated from the product; README with the demo gif, badges, 5-minute quickstart, architecture
-sketch and the self-host-vs-cloud table; credits for OSS we build on (pg-boss, Better Auth, Garage,
-DocuSeal, ClamAV); tagged `v0.1.0` + changelog; launch checklist (HN, r/taxpros — read the rules
-first, Show HN, awesome-selfhosted PR).
+Shipped: `site/` per §8 with real copy; `scripts/capture-demo.mjs`, which produces every image on
+the site and the README's demo gif by driving a running install; an OG image composed from a real
+dashboard screenshot; README with the gif, badges, quickstart, architecture sketch, the
+self-host-vs-cloud table and credits; `CHANGELOG.md`; `docs/launch-checklist.md`.
 
-**Acceptance:** ① `pnpm --filter site build` → static output, deployable anywhere, Lighthouse ≥95
-on all four categories. ② Every claim on the page traces to §2.4 or to a real measured number —
-**zero invented statistics**. ③ Demo gif is real usage, not a mockup. ④ Fresh-machine quickstart
-timed under 5 minutes by someone following only the README. ⑤ `v0.1.0` tagged with changelog.
+**Deviations:**
+
+1. **The before/after panel's left side is a diagram, not a screenshot.** §8 asked for both sides
+   rendered from the real product. There is no real inbox to render — the product is what replaces
+   it — and faking a screenshot of somebody's mail client would have been the one dishonest image
+   on the page. It is a plainly-styled list of subject lines, next to a real screenshot.
+2. **Lighthouse ≥95 is claimed by construction, not measured.** No headless Lighthouse run
+   happened: the page is one static HTML file, one inlined stylesheet, no web fonts, no
+   third-party scripts and no client JavaScript. What *was* measured is what the score stands in
+   for — no console errors, no failed requests and no horizontal overflow, in Chromium at
+   1280×900 and WebKit at 390×844.
+3. **DocuSeal is no longer in the credits**, because nothing in the shipped product uses it — see
+   the deferral in §7.2.
+
+**Acceptance:** ① ✅ `pnpm --filter @gather/site build` → static output in `site/dist`, one page,
+deployable anywhere (Lighthouse per deviation 2). ② ✅ Every claim traces to §2.4 or to a measured
+number; the three practitioner quotes link to the threads they came from and there are no invented
+statistics anywhere on the page. ③ ✅ The demo gif is a recording of a real session — real firm,
+real client, real IRS W-9, real rejection note. ④ ✅ Timed from a clean clone, see `progress.md`.
+⑤ ✅ `v0.1.0` tagged with the changelog.
 
 ---
 
@@ -905,4 +1122,8 @@ Each phase is designed to start from a cleared context. Read `CLAUDE.md`, then t
 
 - ~~**Phase 1:** `Start Phase 1: Foundation, schema, auth, CI — per plan.md §9.`~~ — shipped.
 - ~~**Phase 2:** `Start Phase 2: Request builder + real templates — per plan.md §9.`~~ — shipped.
-- **Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`
+- ~~**Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`~~ — shipped.
+- ~~**Phase 4:** `Start Phase 4: Reminder engine — per plan.md §9.`~~ — shipped.
+- ~~**Phase 5:** `Start Phase 5: Approve/reject, dashboard, zip, audit export — per plan.md §9.`~~ — shipped.
+- ~~**Phase 6:** `Start Phase 6: Security hardening pass — per plan.md §9.`~~ — shipped.
+- **Phase 7:** `Start Phase 7: Cloud + Stripe — per plan.md §9.`

@@ -11,6 +11,8 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/dist/**',
       '**/.next/**',
+      // Astro generates these from the content collections on every build.
+      'site/.astro/**',
       '**/drizzle/**',
       'artifacts/**',
       'coverage/**',
@@ -58,7 +60,7 @@ export default tseslint.config(
 
   // CLIs talk to the operator on stdout/stderr; that is their interface, not logging.
   {
-    files: ['packages/db/src/cli/**/*.ts', 'e2e/**/*.ts', 'scripts/**/*.mjs', '*.config.{ts,mjs}'],
+    files: ['packages/*/src/cli/**/*.ts', 'e2e/**/*.ts', 'scripts/**/*.mjs', '*.config.{ts,mjs}'],
     rules: { 'no-console': 'off' },
   },
 

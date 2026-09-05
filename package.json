@@ -24,7 +24,13 @@
     "seed:templates": "pnpm --filter @gather/db seed:templates",
     "verify:audit": "pnpm --filter @gather/db verify:audit",
     "docs:sources": "node scripts/template-sources.mjs",
-    "docs:sources:check": "node scripts/template-sources.mjs --check"
+    "docs:sources:check": "node scripts/template-sources.mjs --check",
+    "check:email": "pnpm --filter @gather/mail check:email",
+    "worker": "pnpm --filter @gather/worker start",
+    "retention:purge": "pnpm --filter @gather/worker retention:purge",
+    "test:security": "playwright test --project=chromium security.spec.ts",
+    "test:antivirus": "GATHER_TEST_ANTIVIRUS=1 playwright test --project=antivirus",
+    "test:cloud": "scripts/cloud-e2e.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,13 +1,20 @@
 import Link from 'next/link';
 import { ActionForm } from '@/components/action-form';
 import { Card, Field, Input } from '@/components/ui';
+import { safeNext } from '@/lib/next-path';
 import { verifyBackupCodeAction, verifyTotpAction } from '../actions';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Two-factor code · Gather' };
 
-export default function TwoFactorPage() {
+export default async function TwoFactorPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const next = safeNext((await searchParams).next);
+
   return (
     <div className="space-y-4">
       <Card>
@@ -17,6 +24,7 @@ export default function TwoFactorPage() {
         </p>
 
         <ActionForm action={verifyTotpAction} submitLabel="Verify" pendingLabel="Checking…">
+          <input type="hidden" name="next" value={next} />
           <Field label="6-digit code">
             <Input
               name="code"
@@ -43,6 +51,7 @@ export default function TwoFactorPage() {
           pendingLabel="Checking…"
           variant="secondary"
         >
+          <input type="hidden" name="next" value={next} />
           <Field label="Backup code">
             <Input name="code" autoComplete="one-time-code" required className="font-mono" />
           </Field>

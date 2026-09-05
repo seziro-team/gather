@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { appendAuditEvent, client, getDb } from '@gather/db';
-import type { Actor } from './actor';
+import { requirePermission, type Actor } from './actor';
 
 export type Client = typeof client.$inferSelect;
 
@@ -33,6 +33,7 @@ export async function getClient(firmId: string, id: string): Promise<Client | nu
 }
 
 export async function createClient(actor: Actor, input: ClientInput): Promise<Client> {
+  requirePermission(actor, 'clients:write');
   return getDb().transaction(async (tx) => {
     const inserted = await tx
       .insert(client)
@@ -64,6 +65,7 @@ export async function createClient(actor: Actor, input: ClientInput): Promise<Cl
 }
 
 export async function updateClient(actor: Actor, id: string, input: ClientInput): Promise<Client> {
+  requirePermission(actor, 'clients:write');
   return getDb().transaction(async (tx) => {
     const updated = await tx
       .update(client)
@@ -104,6 +106,7 @@ export async function setClientArchived(
   id: string,
   archived: boolean,
 ): Promise<Client> {
+  requirePermission(actor, 'clients:write');
   return getDb().transaction(async (tx) => {
     const updated = await tx
       .update(client)

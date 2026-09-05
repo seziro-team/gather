@@ -1,0 +1,63 @@
+# Gather with virus scanning.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.antivirus.yml up -d
+#
+# ⚠️ ClamAV wants **3 GiB of RAM minimum, 4 GiB preferred** — more than the rest of Gather
+#    combined — and roughly doubles that briefly during its daily signature reload. That is
+#    why this is a separate file you opt into rather than a service in the default stack:
+#    plan.md §5 promises Gather runs on a cheap VPS, and shipping this by default would
+#    break that promise for everyone in order to protect some.
+#
+#    Read from https://docs.clamav.net/manual/Installing/Docker.html on 2026-09-05.
+#
+# With this on:
+#   - every upload is scanned before it can be downloaded by anyone, including the firm
+#   - an infected file is quarantined: the row and the audit event stay as evidence, the
+#     bytes are deleted, and the client is told
+#   - a file whose scan has not finished is `pending` and refused — unknown is not clean
+#
+# Without it, files are marked `skipped` and the UI says "Not scanned". They are never
+# silently treated as clean.
+
+services:
+  clamav:
+    image: clamav/clamav:1.5
+    restart: unless-stopped
+    environment:
+      # The milter is for mail servers; Gather talks to clamd directly over TCP.
+      CLAMAV_NO_MILTERD: 'true'
+      # Signature updates per day. Twelve is ClamAV's own recommendation for a host that
+      # scans continuously; each check is a few kilobytes unless there is something new.
+      FRESHCLAM_CHECKS: 12
+    volumes:
+      # The signature database is ~350 MB and takes minutes to download. Without this it is
+      # fetched again on every container start, and the scanner is unavailable meanwhile.
+      - clamav-db:/var/lib/clamav
+    expose:
+      - '3310'
+    healthcheck:
+      # clamdcheck.sh ships in the image and does a real PING/PONG against clamd.
+      test: ['CMD', 'clamdcheck.sh']
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      # The first start downloads the whole signature database before clamd will answer.
+      start_period: 10m
+
+  web:
+    depends_on:
+      db:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    environment:
+      ANTIVIRUS_DRIVER: clamav
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_TIMEOUT_MS: ${CLAMAV_TIMEOUT_MS:-120000}
+      # clamd's own StreamMaxLength defaults to 25 MB and it refuses anything larger, so
+      # the upload ceiling is lowered to match. Raise both together if you need more.
+      GATHER_MAX_UPLOAD_MB: ${GATHER_MAX_UPLOAD_MB:-25}
+
+volumes:
+  clamav-db:

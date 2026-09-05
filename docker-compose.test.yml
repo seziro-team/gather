@@ -2,10 +2,18 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
 #
-# The only change is opening sign-ups. Each test run creates its own account rather than
-# depending on leftover state, which the default `first-user-only` would refuse on a
-# second run.
+# Two changes, both about the suite creating its own state rather than depending on
+# leftover state:
+#
+#  - Sign-ups are open. The default `first-user-only` would refuse the second test.
+#  - Authentication rate limiting is off. Three sign-ups per five minutes is the right
+#    number for an install on the internet and the wrong one for thirty tests that each
+#    create an account — with it on, the suite throttles itself and fails in a way that
+#    says nothing about the product.
+#
+# ⚠️ Never use this overlay for anything anyone else can reach.
 services:
   web:
     environment:
       GATHER_ALLOW_SIGNUP: open
+      GATHER_AUTH_RATE_LIMIT: 'false'

@@ -3,27 +3,22 @@ import type { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { appendAuditEvent, recordAuditEvent, verifyStoredAuditChain } from './audit.js';
 import { createDatabase, createPool, type Database } from './client.js';
+import { testDatabaseUrl } from './test-database.js';
 import { runMigrations } from './migrator.js';
 import { auditEvent, auditHead } from './schema/audit.js';
 
 /**
  * Integration tests against a real PostgreSQL instance — the chain's correctness depends
  * on Postgres behaviour (advisory locks, jsonb normalisation, timestamptz precision) that
- * a mock could not reproduce. CI starts a postgres service for this; locally, point
- * TEST_DATABASE_URL at a scratch database.
+ * a mock could not reproduce. CI starts a postgres service for this; locally,
+ * `testDatabaseUrl()` finds or creates a scratch database that is never the one in
+ * DATABASE_URL. See test-database.ts for why that distinction matters.
  */
-const connectionString = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error(
-    'Set TEST_DATABASE_URL (or DATABASE_URL) to a scratch Postgres database to run the database tests.',
-  );
-}
-
 let pool: Pool;
 let db: Database;
 
 beforeAll(async () => {
-  pool = createPool(connectionString, { max: 12 });
+  pool = createPool(await testDatabaseUrl(), { max: 12 });
   db = createDatabase(pool);
   await runMigrations(pool, db);
 });

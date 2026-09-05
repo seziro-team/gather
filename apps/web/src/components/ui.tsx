@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, ComponentPropsWithoutRef, ReactNode } from 'react';
 
 /** Small set of styled primitives. Deliberately plain — no component library dependency. */
 
@@ -111,18 +111,23 @@ export function Select({ className, ...props }: ComponentProps<'select'>) {
 export function Badge({
   tone = 'neutral',
   children,
+  ...rest
 }: {
-  tone?: 'neutral' | 'brand' | 'amber' | 'green';
+  // `red` exists for one reason: a bounced reminder is the most important line in a
+  // reminder log, and amber does not say "this client never got it".
+  tone?: 'neutral' | 'brand' | 'amber' | 'green' | 'red';
   children: ReactNode;
-}) {
+} & Omit<ComponentPropsWithoutRef<'span'>, 'children' | 'className'>) {
   const styles = {
     neutral: 'bg-slate-100 text-slate-700 ring-slate-200',
     brand: 'bg-brand-50 text-brand-800 ring-brand-200',
     amber: 'bg-amber-50 text-amber-800 ring-amber-200',
     green: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+    red: 'bg-red-50 text-red-800 ring-red-200',
   }[tone];
   return (
     <span
+      {...rest}
       className={cx(
         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
         styles,

@@ -6,7 +6,10 @@ import { z } from 'zod';
 import { parseTemplateBody, TemplateBodyError, type TemplateBody } from '@gather/core';
 import { readRequestStructure, getDb } from '@gather/db';
 import { currentActor } from '@/lib/actor';
+import { downloadQuery, firmScope, signFileDownload } from '@/lib/files';
+import { issuePortalLink, revokePortalLink } from '@/lib/portal';
 import {
+  completeRequest,
   createRequest,
   deleteRequest,
   getRequest,
@@ -16,6 +19,18 @@ import {
 import { saveRequestAsTemplate } from '@/lib/templates';
 import type { FormState } from '@/lib/form-state';
 import type { SaveStructureResult } from './structure-result';
+import { cadenceSchema, describeCadence } from '@gather/core';
+import { saveSchedule, sendReminderNow } from '@/lib/reminders';
+import { approve, reject } from '@/lib/review';
+import type {
+  CompleteResult,
+  FirmDownloadResult,
+  LinkActionResult,
+  NewLinkResult,
+  ReviewActionResult,
+  ScheduleResult,
+  SendNowResult,
+} from './share-result';
 
 /** An empty date input posts an empty string; treat that as "no due date". */
 const optionalDate = z
@@ -140,6 +155,68 @@ export async function saveRequestStructureAction(
   return { ok: true, body: saved };
 }
 
+/**
+ * Create a portal link and hand it back once.
+ *
+ * Only the hash is stored, so this is genuinely the only moment the link exists in a form
+ * anyone can copy. The UI says as much rather than offering a "show again" button that
+ * would have to be a lie.
+ */
+export async function createPortalLinkAction(requestId: string): Promise<NewLinkResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  try {
+    const link = await issuePortalLink(actor, requestId);
+    revalidatePath(`/requests/${requestId}`);
+    revalidatePath('/requests');
+    return { ok: true, url: link.url, expiresAt: link.expiresAt.toISOString() };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+export async function revokePortalLinkAction(
+  requestId: string,
+  tokenId: string,
+): Promise<LinkActionResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(tokenId).success) {
+    return { ok: false, error: 'That link could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  try {
+    await revokePortalLink(actor, requestId, tokenId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  return { ok: true };
+}
+
+/** Signed at the moment of the click, so a five-minute link is genuinely five minutes old. */
+export async function firmDownloadLinkAction(
+  requestId: string,
+  fileId: string,
+): Promise<FirmDownloadResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(fileId).success) {
+    return { ok: false, error: 'That file could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  const owned = await getRequest(actor.firmId, requestId);
+  if (!owned) return { ok: false, error: 'Request not found.' };
+
+  const signed = signFileDownload(fileId, firmScope(actor.firmId));
+  return {
+    ok: true,
+    url: `/api/file/${fileId}?request=${requestId}&${downloadQuery(signed)}`,
+  };
+}
+
 export async function deleteRequestAction(formData: FormData): Promise<void> {
   const id = z.uuid().parse(formData.get('id'));
   const actor = await currentActor();
@@ -180,4 +257,141 @@ export async function saveAsTemplateAction(
 
   revalidatePath('/templates');
   redirect('/templates');
+}
+
+/**
+ * Turn a cadence posted from the editor into a schedule.
+ *
+ * Parsed with the same zod schema the worker uses to read it back out of `jsonb`, so a
+ * cadence that saves is a cadence the engine can act on — there is no second, looser
+ * definition of what a valid schedule is.
+ */
+export async function saveScheduleAction(
+  requestId: string,
+  cadence: unknown,
+  active: boolean,
+): Promise<ScheduleResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const parsed = cadenceSchema.safeParse(cadence);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      ok: false,
+      error: issue
+        ? `${issue.path.join('.') || 'Schedule'} ${issue.message}`
+        : 'Check the schedule.',
+    };
+  }
+
+  const actor = await currentActor();
+  try {
+    const { nextRunAt } = await saveSchedule(actor, requestId, parsed.data, active);
+    revalidatePath(`/requests/${requestId}`);
+    return {
+      ok: true,
+      nextRunAt: nextRunAt?.toISOString() ?? null,
+      description: describeCadence(parsed.data),
+    };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+export async function sendReminderNowAction(requestId: string): Promise<SendNowResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  const result = await sendReminderNow(actor, requestId);
+  revalidatePath(`/requests/${requestId}`);
+  return result;
+}
+
+/**
+ * Mark a request complete, which is also what stops the reminders.
+ *
+ * Phase 5 replaces this with per-item approval driving the same transition; until then it
+ * is a deliberate button rather than an inference, because "complete" is the firm's
+ * judgement and nothing else should be making it.
+ */
+export async function completeRequestAction(requestId: string): Promise<CompleteResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  try {
+    await completeRequest(actor, requestId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  return { ok: true };
+}
+
+/**
+ * Approve one item.
+ *
+ * Approving the last required item completes the request and stops its reminders, in the
+ * same transaction — so there is no window in which a finished request is still chasing.
+ */
+export async function approveItemAction(
+  requestId: string,
+  itemId: string,
+): Promise<ReviewActionResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(itemId).success) {
+    return { ok: false, error: 'That item could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  const outcome = await approve(actor, requestId, itemId);
+  if (!outcome.ok) return outcome;
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath('/dashboard');
+  return {
+    ok: true,
+    status: 'approved',
+    completed: outcome.result.completed,
+    requiredRemaining: outcome.result.requiredRemaining,
+  };
+}
+
+/** Send one item back with a note, and email the client to say so. */
+export async function rejectItemAction(
+  requestId: string,
+  itemId: string,
+  note: string,
+): Promise<ReviewActionResult> {
+  if (!z.uuid().safeParse(requestId).success || !z.uuid().safeParse(itemId).success) {
+    return { ok: false, error: 'That item could not be identified.' };
+  }
+
+  const parsed = z
+    .string()
+    .trim()
+    .min(1, 'Say what is wrong with it — the client sees this note and nothing else.')
+    .max(1000, 'Keep the note under 1000 characters.')
+    .safeParse(note);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]!.message };
+  }
+
+  const actor = await currentActor();
+  const outcome = await reject(actor, requestId, itemId, parsed.data);
+  if (!outcome.ok) return outcome;
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath('/dashboard');
+  return {
+    ok: true,
+    status: 'rejected',
+    completed: false,
+    requiredRemaining: outcome.result.requiredRemaining,
+  };
 }

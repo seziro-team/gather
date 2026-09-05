@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { BUILTIN_TEMPLATES, instantiateBody, parseTemplateBody } from '@gather/core';
 import { createDatabase, createPool, type Database } from './client.js';
+import { testDatabaseUrl } from './test-database.js';
 import { runMigrations } from './migrator.js';
 import { seedBuiltinTemplates } from './seed.js';
 import { readRequestStructure, replaceRequestStructure } from './structure.js';
@@ -14,20 +15,14 @@ import { client, firm, item, request, section, template } from './schema/gather.
  * that row identity survives an edit, that a template copy is genuinely independent, and
  * that seeding is idempotent — only means anything against real rows.
  */
-const connectionString = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error(
-    'Set TEST_DATABASE_URL (or DATABASE_URL) to a scratch Postgres database to run the database tests.',
-  );
-}
-
 let pool: Pool;
 let db: Database;
 let firmId: string;
 let clientId: string;
 
 beforeAll(async () => {
-  pool = createPool(connectionString, { max: 8 });
+  // Never the database in DATABASE_URL — see test-database.ts.
+  pool = createPool(await testDatabaseUrl(), { max: 8 });
   db = createDatabase(pool);
   await runMigrations(pool, db);
 });
