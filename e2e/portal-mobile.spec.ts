@@ -198,7 +198,7 @@ test('① a client uploads a real PDF and a phone photo, on a phone, with no acc
   // The firm sees the same hash on its side, which is what makes it a chain of custody.
   await firm.page.goto(`/requests/${firm.requestId}`);
   await expect(
-    firm.page.getByTestId('firm-file').filter({ hasText: pdf.name }).first(),
+    firm.page.getByTestId('review-file').filter({ hasText: pdf.name }).first(),
   ).toContainText(pdf.sha256.slice(0, 10));
 
   await testInfo.attach('portal-on-a-phone.png', {
@@ -299,7 +299,7 @@ test('⑤ nothing scoped to one request can reach another request’s file', asy
   // scoped to the firm, so it verifies against request A too — and A's route still has
   // to refuse, because the file → response → item → section → request join finds nothing.
   await firm.page.goto(`/requests/${secondId}`);
-  const firmRow = firm.page.getByTestId('firm-file').filter({ hasText: pdf.name }).first();
+  const firmRow = firm.page.getByTestId('review-file').filter({ hasText: pdf.name }).first();
   const legitimate = await mintedDownloadUrl(firm.page, firmRow);
   expect(legitimate).toContain(victimFileId);
 

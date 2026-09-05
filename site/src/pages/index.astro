@@ -1,0 +1,584 @@
+---
+/**
+ * Gather's one page.
+ *
+ * Every claim here is a claim the software can back. Every screenshot is captured from a
+ * running install by `scripts/capture-demo.mjs`, every quote is a real practitioner with a
+ * link to the thread, and the pricing table names only features that exist. Where something
+ * is not built, the page says so — see the FAQ and the pricing footnote.
+ */
+const REPO = import.meta.env.PUBLIC_REPO_URL ?? 'https://github.com/seziro-team/gather';
+const SITE = Astro.site?.toString().replace(/\/$/, '') ?? '';
+
+const title = 'Gather — stop being your clients’ alarm clock';
+const description =
+  'Open-source document collection for accountants and bookkeepers. You build the request, ' +
+  'your client gets a link with no account, and Gather does the chasing until every item is ' +
+  'in. Free and self-hosted, forever.';
+
+const steps = [
+  {
+    n: '1',
+    title: 'Build the request',
+    body: 'Start from a template built out of published IRS, CFPB, SBA and Fannie Mae guidance — every item links to the page it came from — or write your own. Files, text, dates, yes/no, choices. Mark what is required.',
+  },
+  {
+    n: '2',
+    title: 'Your client gets a link',
+    body: 'No account. No password. No app to install. It opens on their phone, saves as they type, and takes a photo of a receipt as happily as a PDF. Close the tab mid-sentence and nothing is lost.',
+  },
+  {
+    n: '3',
+    title: 'Gather does the chasing — then stops',
+    body: 'Reminders go at a time on your client’s clock, skipping quiet hours, listing exactly what is still missing. The moment the last required item is approved they stop on their own.',
+  },
+];
+
+const quotes = [
+  {
+    text: 'don’t want to have to create accounts and log into portals, and prefer to just reply to an email',
+    who: 'r/Bookkeeping',
+    context: '“Following Up with Clients Who Don’t Like Tech”',
+    href: 'https://redd.it/1ka0d1u',
+  },
+  {
+    text: 'in general this is a big part of our service chasing documents/holding hands',
+    who: 'u/mmgnyc, r/taxpros',
+    context: '“Dealing with missing client documents in spite of organizers”',
+    href: 'https://redd.it/147xrl6',
+  },
+  {
+    text: 'I remind them that I have reached [out] 6x between February and April, and was not presented with tax information until April 12th.',
+    who: 'r/taxpros',
+    context: 'a client blaming the preparer for a late return',
+    href: 'https://redd.it/16znfop',
+  },
+];
+
+const faqs = [
+  {
+    q: 'Do my clients need an account?',
+    a: 'No — and that is the whole design. They get a link. It opens a page scoped to their one request, on any phone, with no password to forget and no app to install. The link expires, can be revoked, and every time it is opened is recorded.',
+  },
+  {
+    q: 'Where do the files actually live?',
+    a: 'On your server, if you self-host — which is the default and the point. Every file is encrypted with AES-256-GCM before it touches the disk, under a key you can hold yourself. Local disk works out of the box; any S3-compatible store (R2, B2, Wasabi, MinIO, Garage) works with four environment variables.',
+  },
+  {
+    q: 'Does this help with the FTC Safeguards Rule or IRS Pub 4557?',
+    a: 'It ships controls that map to specific elements — multi-factor authentication on staff accounts, encryption at rest and in transit, access controls, a tamper-evident audit log, and a disposal command. What it cannot do is make a firm compliant: most of the Rule is about your written plan, your risk assessment and your people. The repo has an honest mapping of what Gather does and the longer list of what it does not do for you.',
+  },
+  {
+    q: 'Can I use my own domain, my own SMTP and my own storage?',
+    a: 'Yes, and nothing phones home. Every setting is an environment variable, documented with its default and where to obtain it. Reminders go through Resend or any SMTP server you already have, and `pnpm check:email` reads your SPF, DKIM and DMARC records and sends a real test message before you trust it.',
+  },
+  {
+    q: 'What is actually different in Cloud?',
+    a: 'Hosting. We run it, back it up, update it and run the retention purge; you get seats and storage rather than a disk. The product is the same code — the request builder, the portal, the reminders, the per-item approvals and the audit trail are all in the free version, uncapped. If Cloud ever stopped existing, self-hosting would still be the whole product.',
+  },
+];
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={SITE + '/'} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={SITE + '/'} />
+    <meta property="og:image" content={SITE + '/og.png'} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0f766e" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    <script type="application/ld+json" set:html={JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'Gather',
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'Docker, Linux, macOS, Windows',
+      description,
+      license: 'https://www.gnu.org/licenses/agpl-3.0.html',
+      codeRepository: REPO,
+      offers: {
+        '@type': 'Offer',
+        price: '0',
+        priceCurrency: 'USD',
+        description: 'Self-hosted, free forever, no limits.',
+      },
+    })} />
+  </head>
+
+  <body>
+    <header class="bar">
+      <a class="wordmark" href="/">Gather</a>
+      <nav>
+        <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
+        <a href={REPO}>GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <!-- ── Hero ─────────────────────────────────────────────────────────── -->
+      <section class="hero">
+        <h1>Stop being your clients’ alarm clock.</h1>
+        <p class="lede">
+          Gather sends the reminders, chases the missing documents, and tells you exactly
+          what is still outstanding. Your clients never make an account.
+          <strong>Free and self-hosted, forever.</strong>
+        </p>
+
+        <div class="cta">
+          <pre class="install"><code>git clone {REPO}.git
+cd gather &amp;&amp; cp .env.example .env
+docker compose up -d</code></pre>
+          <div class="cta-links">
+            <a class="button primary" href={REPO}>Read the source</a>
+            <a class="button" href="#pricing">See pricing</a>
+          </div>
+        </div>
+        <p class="fine">
+          Postgres and Docker. Nothing else — no Redis, no broker, no object store, no
+          account with us.
+        </p>
+      </section>
+
+      <!-- ── Before / after ───────────────────────────────────────────────── -->
+      <section class="split">
+        <div class="panel before">
+          <h2>Today</h2>
+          <ul class="inbox">
+            <li><span>Re: documents?</span><em>Feb 4</em></li>
+            <li><span>Following up — bank statements</span><em>Feb 11</em></li>
+            <li><span>Re: Re: documents?</span><em>Feb 19</em></li>
+            <li><span>Still missing 1099-NEC + mileage log</span><em>Mar 2</em></li>
+            <li><span>Gentle nudge 🙂</span><em>Mar 14</em></li>
+            <li><span>Third request — W-2</span><em>Mar 28</em></li>
+            <li class="dim">…and 41 more</li>
+          </ul>
+          <p class="caption">
+            Six weeks of chasing, in your sent folder, unbilled — and no single place that
+            says what is still outstanding.
+          </p>
+        </div>
+
+        <div class="panel after">
+          <h2>With Gather</h2>
+          <img
+            src="/shots/review.png"
+            alt="A Gather request showing each item approved one by one, with the audit trail beneath."
+            width="1280"
+            height="800"
+            loading="lazy"
+          />
+          <p class="caption">
+            One checklist. The client works down it from their phone; you approve item by
+            item. “Complete” is your decision, not the client’s assumption.
+          </p>
+        </div>
+      </section>
+
+      <!-- ── Demo ─────────────────────────────────────────────────────────── -->
+      <section class="demo">
+        <h2>Watch it happen</h2>
+        <p class="section-lede">
+          Recorded from a running install: build the request, send the link, the client
+          uploads a real IRS W-9 from a phone, you review it item by item.
+        </p>
+        <img
+          src="/demo.gif"
+          alt="Screen recording of Gather: building a request from a template, issuing a client link, and reviewing what came back."
+          class="framed"
+          loading="lazy"
+        />
+        <p class="fine">
+          Every image on this page is captured from the working product by
+          <code>scripts/capture-demo.mjs</code>. There is no design mock anywhere on this
+          site — if the software changes, these change with it.
+        </p>
+      </section>
+
+      <!-- ── How it works ─────────────────────────────────────────────────── -->
+      <section id="how" class="how">
+        <h2>How it works</h2>
+        <ol class="steps">
+          {steps.map((s) => (
+            <li>
+              <span class="n">{s.n}</span>
+              <h3>{s.title}</h3>
+              <p>{s.body}</p>
+            </li>
+          ))}
+        </ol>
+        <div class="shots">
+          <figure>
+            <img src="/shots/builder.png" alt="The Gather request builder, with sections and items." loading="lazy" />
+            <figcaption>The builder, with a real template loaded.</figcaption>
+          </figure>
+          <figure class="phone">
+            <img
+              src="/shots/portal-rejected.png"
+              alt="The client portal on an iPhone, showing an item sent back with the note: This is page 1 only — I need all four pages, including the signature page."
+              loading="lazy"
+            />
+            <figcaption>
+              What your client sees when you send one item back. No account, and your note in
+              their words.
+            </figcaption>
+          </figure>
+          <figure>
+            <img src="/shots/dashboard.png" alt="The Gather dashboard, showing what is waiting for review and what is overdue." loading="lazy" />
+            <figcaption>What is waiting for you, and what is late.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ── The chase, in their words ────────────────────────────────────── -->
+      <section class="voices">
+        <h2>Why this exists</h2>
+        <p class="section-lede">
+          Not statistics we invented. Practitioners, in public, describing the job nobody
+          bills for.
+        </p>
+        <div class="quotes">
+          {quotes.map((q) => (
+            <figure>
+              <blockquote>{q.text}</blockquote>
+              <figcaption>
+                <a href={q.href} rel="nofollow noopener">{q.who}</a> — {q.context}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </section>
+
+      <!-- ── Open source ──────────────────────────────────────────────────── -->
+      <section class="oss">
+        <h2>Open source, and it means what it says</h2>
+        <div class="oss-grid">
+          <div>
+            <h3>Your clients’ tax documents stay on your server</h3>
+            <p>
+              Self-hosted is the real product, not a trial. No cap on requests, clients,
+              seats or storage — the code has <code>null</code> where the limit would be, not
+              a large number waiting to be turned down. Nothing phones home.
+            </p>
+            <p>
+              <a href={REPO}>github.com/seziro-team/gather</a> · AGPL-3.0 · TypeScript,
+              Postgres, Docker
+            </p>
+          </div>
+          <div>
+            <h3>An audit trail you can hand to somebody else</h3>
+            <p>
+              Every sign-in, edit, reminder, portal open, upload, decision and download is
+              written to a hash-chained, append-only log. <code>UPDATE</code> and
+              <code>DELETE</code> are blocked by a database trigger.
+            </p>
+            <p>
+              The export verifies <em>without</em> the database — hand the CSV to a client
+              or an insurer and they can recompute every hash themselves:
+            </p>
+            <pre class="install"><code>pnpm verify:audit --csv gather-audit.csv
+# OK: 11 events, every row’s hash recomputes</code></pre>
+            <img
+              src="/shots/audit.png"
+              alt="The history of one request: portal link created, client opened the link, client uploaded a file, item sent back — each with an id, a timestamp and a hash."
+              class="framed"
+              loading="lazy"
+            />
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Pricing ──────────────────────────────────────────────────────── -->
+      <section id="pricing" class="pricing">
+        <h2>Pricing</h2>
+        <p class="section-lede">
+          We don’t charge per request. <strong>Your January isn’t a billing event.</strong>
+        </p>
+
+        <div class="plans">
+          <article class="plan featured">
+            <h3>Self-hosted</h3>
+            <p class="price">Free<span> forever</span></p>
+            <ul>
+              <li>Unlimited requests, clients, seats and storage</li>
+              <li>Request builder, templates and the client portal</li>
+              <li>Reminders, per-item approvals, zip export</li>
+              <li>Team roles and invitations</li>
+              <li>Tamper-evident audit trail and its verifier</li>
+              <li>Your server, your disk, your encryption key</li>
+            </ul>
+            <a class="button primary" href={REPO}>Get it on GitHub</a>
+          </article>
+
+          <article class="plan">
+            <h3>Gather Cloud</h3>
+            <p class="price">$25<span>/month</span></p>
+            <ul>
+              <li>Everything in self-hosted, same code</li>
+              <li>3 seats · 25 GB</li>
+              <li>Hosting, backups and updates by us</li>
+              <li>We run the retention purge</li>
+            </ul>
+            <p class="soon">Not open yet</p>
+          </article>
+
+          <article class="plan">
+            <h3>Cloud Pro</h3>
+            <p class="price">$59<span>/month</span></p>
+            <ul>
+              <li>Everything in Cloud</li>
+              <li>10 seats · 100 GB</li>
+              <li>For a practice with a team</li>
+            </ul>
+            <p class="soon">Not open yet</p>
+          </article>
+        </div>
+
+        <p class="fine">
+          <strong>Cloud is not taking signups.</strong> The hosted tier runs — plan limits,
+          the billing page, the operator console — but its Stripe billing has never
+          completed a real call, because this build has never had a Stripe account. That is
+          written down in the repo rather than glossed over, and self-hosting is unaffected.
+          Every paid line above is hosting or somebody else doing the work: nothing in the
+          free product is held back to create a paid one.
+        </p>
+      </section>
+
+      <!-- ── FAQ ──────────────────────────────────────────────────────────── -->
+      <section id="faq" class="faq">
+        <h2>Questions</h2>
+        {faqs.map((f) => (
+          <details>
+            <summary>{f.q}</summary>
+            <p>{f.a}</p>
+          </details>
+        ))}
+      </section>
+    </main>
+
+    <footer>
+      <p>Built in the open by <a href="https://github.com/seziro-team">Seziro</a>.</p>
+      <p class="fine">
+        <a href={REPO}>Source</a> · <a href={REPO + '/blob/main/LICENSE'}>AGPL-3.0</a> ·
+        <a href={REPO + '/blob/main/docs/threat-model.md'}>Threat model</a> ·
+        <a href={REPO + '/blob/main/plan.md'}>The plan this was built against</a>
+      </p>
+    </footer>
+
+    <style is:global>
+      /* One stylesheet, inlined at build time. No web fonts: nothing on this page makes a
+         request to anybody, which is the same promise the product makes. */
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --line: #e2e8f0;
+        --brand: #0f766e;
+        --brand-dark: #115e59;
+        --wash: #f8fafc;
+        --radius: 12px;
+        --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+          sans-serif;
+        --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+
+      html { scroll-behavior: smooth; }
+
+      body {
+        margin: 0;
+        font-family: var(--font);
+        color: var(--ink);
+        background: #fff;
+        line-height: 1.6;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      a { color: var(--brand-dark); }
+
+      code, pre { font-family: var(--mono); }
+
+      img { max-width: 100%; height: auto; display: block; }
+
+      main { max-width: 68rem; margin: 0 auto; padding: 0 1.25rem; }
+
+      section { padding: 4rem 0; border-top: 1px solid var(--line); }
+      section:first-child { border-top: 0; }
+
+      h1, h2, h3 { line-height: 1.2; letter-spacing: -0.02em; }
+      h2 { font-size: clamp(1.6rem, 3.5vw, 2.1rem); margin: 0 0 0.75rem; }
+      h3 { font-size: 1.1rem; margin: 0 0 0.4rem; }
+
+      .section-lede { color: var(--muted); max-width: 44rem; margin: 0 0 2rem; }
+
+      .fine { color: var(--muted); font-size: 0.875rem; max-width: 44rem; }
+
+      /* ── Bar ── */
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        max-width: 68rem;
+        margin: 0 auto;
+        padding: 1rem 1.25rem;
+        flex-wrap: wrap;
+      }
+      .wordmark {
+        font-weight: 700;
+        font-size: 1.15rem;
+        letter-spacing: -0.03em;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .bar nav { margin-left: auto; display: flex; gap: 1.25rem; flex-wrap: wrap; }
+      .bar nav a { color: var(--muted); text-decoration: none; font-size: 0.95rem; }
+      .bar nav a:hover { color: var(--ink); }
+
+      /* ── Hero ── */
+      .hero { padding-top: 3rem; text-align: left; }
+      .hero h1 {
+        font-size: clamp(2.2rem, 6vw, 3.6rem);
+        margin: 0 0 1rem;
+        max-width: 20ch;
+      }
+      .lede { font-size: clamp(1.05rem, 2vw, 1.25rem); color: var(--muted); max-width: 46rem; }
+      .lede strong { color: var(--ink); }
+
+      .cta {
+        display: flex;
+        gap: 1.25rem;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        margin: 2rem 0 1rem;
+      }
+      .cta-links { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+
+      .install {
+        background: var(--ink);
+        color: #e2e8f0;
+        padding: 1rem 1.1rem;
+        border-radius: var(--radius);
+        font-size: 0.85rem;
+        overflow-x: auto;
+        margin: 0;
+        line-height: 1.7;
+      }
+
+      .button {
+        display: inline-block;
+        padding: 0.7rem 1.15rem;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        text-decoration: none;
+        color: var(--ink);
+        font-weight: 600;
+        font-size: 0.95rem;
+        background: #fff;
+      }
+      .button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+      .button:hover { border-color: var(--brand); }
+
+      /* ── Split ── */
+      .split { display: grid; gap: 2rem; grid-template-columns: 1fr; }
+      @media (min-width: 900px) { .split { grid-template-columns: 1fr 1.35fr; } }
+      .panel h2 { font-size: 1.15rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+      .caption { color: var(--muted); font-size: 0.9rem; margin-top: 0.9rem; }
+
+      .inbox { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+      .inbox li {
+        display: flex;
+        gap: 1rem;
+        justify-content: space-between;
+        padding: 0.7rem 0.9rem;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.9rem;
+        background: var(--wash);
+      }
+      .inbox li:last-child { border-bottom: 0; }
+      .inbox em { color: var(--muted); font-style: normal; white-space: nowrap; }
+      .inbox .dim { color: var(--muted); justify-content: center; }
+
+      .after img, .framed { border: 1px solid var(--line); border-radius: var(--radius); }
+
+      /* ── Demo ── */
+      .demo .framed { margin: 0 0 1rem; }
+
+      /* ── How ── */
+      .steps { list-style: none; counter-reset: step; margin: 0 0 2.5rem; padding: 0; display: grid; gap: 1.75rem; }
+      @media (min-width: 820px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+      .steps .n {
+        display: inline-grid;
+        place-items: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 999px;
+        background: var(--brand);
+        color: #fff;
+        font-weight: 700;
+        font-size: 0.9rem;
+        margin-bottom: 0.6rem;
+      }
+      .steps p { color: var(--muted); margin: 0; }
+
+      .shots { display: grid; gap: 1.25rem; grid-template-columns: 1fr; align-items: start; }
+      @media (min-width: 820px) { .shots { grid-template-columns: 1.4fr 0.6fr 1.4fr; } }
+      .shots figure { margin: 0; }
+      .shots img { border: 1px solid var(--line); border-radius: var(--radius); }
+      .shots figcaption { color: var(--muted); font-size: 0.85rem; margin-top: 0.5rem; }
+
+      /* ── Voices ── */
+      .quotes { display: grid; gap: 1.25rem; grid-template-columns: 1fr; }
+      @media (min-width: 820px) { .quotes { grid-template-columns: repeat(3, 1fr); } }
+      .quotes figure { margin: 0; padding: 1.25rem; background: var(--wash); border-radius: var(--radius); border: 1px solid var(--line); }
+      .quotes blockquote { margin: 0 0 0.9rem; font-size: 1rem; }
+      .quotes blockquote::before { content: '“'; }
+      .quotes blockquote::after { content: '”'; }
+      .quotes figcaption { color: var(--muted); font-size: 0.85rem; }
+
+      /* ── OSS ── */
+      .oss-grid { display: grid; gap: 2rem; grid-template-columns: 1fr; }
+      @media (min-width: 820px) { .oss-grid { grid-template-columns: 1fr 1fr; } }
+      .oss p { color: var(--muted); }
+
+      /* ── Pricing ── */
+      .plans { display: grid; gap: 1.25rem; grid-template-columns: 1fr; margin-bottom: 1.5rem; }
+      @media (min-width: 820px) { .plans { grid-template-columns: repeat(3, 1fr); } }
+      .plan { border: 1px solid var(--line); border-radius: var(--radius); padding: 1.5rem; display: flex; flex-direction: column; }
+      .plan.featured { border-color: var(--brand); border-width: 2px; }
+      .price { font-size: 2rem; font-weight: 700; margin: 0.25rem 0 1rem; }
+      .price span { font-size: 0.95rem; font-weight: 400; color: var(--muted); }
+      .plan ul { margin: 0 0 1.5rem; padding-left: 1.1rem; color: var(--muted); font-size: 0.95rem; }
+      .plan li { margin-bottom: 0.35rem; }
+      .plan .button { margin-top: auto; text-align: center; }
+      /* Not a disabled button: there is nothing to press, so there is no button. A greyed
+         control that never becomes pressable is a lie with a cursor. */
+      .soon {
+        margin-top: auto;
+        padding: 0.7rem 0;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.95rem;
+        border-top: 1px dashed var(--line);
+      }
+
+      /* ── FAQ ── */
+      .faq details { border-bottom: 1px solid var(--line); padding: 1rem 0; }
+      .faq summary { cursor: pointer; font-weight: 600; font-size: 1.05rem; }
+      .faq p { color: var(--muted); margin: 0.75rem 0 0; max-width: 52rem; }
+
+      /* ── Footer ── */
+      footer { max-width: 68rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; border-top: 1px solid var(--line); }
+      footer p { margin: 0.25rem 0; }
+    </style>
+  </body>
+</html>

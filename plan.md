@@ -1,8 +1,8 @@
 # Gather — Build Plan
 
-**Status:** Phases 1–5 shipped (foundation; request builder and built-in templates; client
-portal with encrypted uploads; reminder engine; review, dashboard and evidence export).
-Phase 6 is next.
+**Status:** Phases 1–6 shipped (foundation; request builder and built-in templates; client
+portal with encrypted uploads; reminder engine; review, dashboard and evidence export;
+security hardening). Phase 7 is next.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -526,18 +526,33 @@ Hosted on Seziro infrastructure, built in `cloud/` as a deployable layer over th
 | Seats | Unlimited | 3 | 10 |
 | Storage | Your disk | 25 GB | 100 GB |
 | Hosting, backups, updates | You | Us | Us |
-| White-label domain + sending domain | DIY | ✅ | ✅ |
-| SMS reminders (10DLC) | — | — | ✅ + metered |
-| E-signature on completion | — | — | ✅ |
-| Sync to Drive / Dropbox / OneDrive | — | — | ✅ |
-| Team roles | Basic | ✅ | ✅ + granular |
-| Retention policies | Manual config | ✅ | ✅ |
+| Team roles (owner / admin / member) | ✅ | ✅ | ✅ |
+| Retention policies | You run the purge | We run it | We run it |
 
-Stripe in **test mode** until the operator flips live keys. SMS billed as metered usage
-(Stripe Meters) at pass-through cost + margin — never bundled, because 10DLC costs are real.
+Stripe in **test mode** until the operator flips live keys.
 
-**Boundary rule check:** every paid item is hosting, a cost we pay per message, a third-party
-integration, or a compliance convenience. Nothing in §7.1 is crippled to create §7.2.
+**Boundary rule check:** every paid item is hosting or a compliance convenience. Nothing in
+§7.1 is crippled to create §7.2 — team roles, retention, the audit trail and every core
+capability are in the free product, unmetered.
+
+#### Deferred from v0.1.0 — and why (2026-09-05)
+
+Three items in the original table are **not built**, and are not sold:
+
+| Deferred | What it needs before it can be real |
+|---|---|
+| SMS reminders | A Twilio account and a **registered A2P 10DLC brand** — days to weeks of carrier registration, and real money per message. |
+| E-signature on completion | A DocuSeal deployment plus its API token. Self-hostable, so this is the nearest of the three. |
+| Sync to Drive / Dropbox / OneDrive | OAuth applications registered at **three** separate vendors, each with its own review. |
+
+They were cut rather than stubbed. Writing three integrations that have never once been run
+against the real API — and then listing them on a pricing page — is precisely the behaviour
+§4 exists to forbid, and a customer discovering an advertised feature does not work is worse
+than one who never saw it offered. `FEATURES` in `packages/core/src/plans.ts` therefore
+contains only what exists, and the site's pricing table is generated from it.
+
+Cloud Pro is consequently a capacity tier: ten seats and 100 GB rather than three and 25 GB.
+That is a thinner difference than this plan first imagined, and it is the true one.
 
 ---
 
@@ -921,7 +936,7 @@ pnpm verify:audit --csv gather-audit-$REQ.csv      # FAIL: content was modified
 
 ---
 
-### Phase 6 — Security hardening pass
+### Phase 6 — Security hardening pass ✅ **shipped**
 **Goal:** earn the right to say "tax documents".
 
 Tasks: rate limiting (token/IP/account) with 429s + backoff headers; ClamAV profile + quarantine
@@ -930,44 +945,105 @@ revocation UI; retention/purge job; log redaction; `pnpm audit` + Dependabot; th
 (`docs/threat-model.md`); `SECURITY.md` + `docs/incident-response.md`; **`docs/safeguards-rule-mapping.md`**
 (the §6 table, with an explicit "what Gather does *not* do for you" section); authorization test suite.
 
-**Acceptance:** ① Automated tests prove cross-request IDOR is impossible across portal, API and
-download paths. ② Expired token → 401; revoked token → 401; both audited. ③ >N req/min → 429.
-④ **EICAR test file → quarantined, never downloadable**, flagged in UI and audit log. ⑤ With the
-antivirus profile off, files are visibly `scan_skipped` — never silently unscanned.
-⑥ `securityheaders.com`-equivalent checks pass locally. ⑦ Retention purge removes the object from
-disk **and** S3, verified by direct inspection.
+> **Deviation (P6).** Rate limiting has **two magic-link buckets**, not one. `portal.open`
+> is per IP and only reachable when `GATHER_TRUST_PROXY` is on; `portal.open.shared` is a
+> much higher ceiling for when Gather cannot tell one caller from another. Applying the
+> per-IP number globally — which is what a single bucket means without a proxy — locks a
+> firm's own clients out of their own documents when thirty organizers go out in January.
+> Found by the acceptance test doing exactly that to the tests that ran after it.
+>
+> **Deviation (P6).** A dead link redirects to `/portal/unavailable?reason=…` rather than
+> returning 401. The criterion said 401; a client who clicks an expired link needs a page
+> that says "ask your accountant for a fresh one", not a status code. The **rejection is
+> still audited with its reason**, which is what the criterion was protecting.
+>
+> **Deviation (P6).** There is no separate download origin. The plan called for one; what
+> ships is `Content-Disposition: attachment` on every file, `X-Content-Type-Options:
+> nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, and **refusing the file
+> types that could execute at all** — an upload that is markup is rejected whatever it is
+> named. A second origin needs a second hostname and a second certificate, which would put
+> a DNS change in the middle of a five-minute quickstart to defend against something three
+> other layers already stop.
+>
+> **Deviation (P6).** `retention:purge` runs **inside the container**, not from the host:
+> with the local driver the files are in a volume the host cannot see, so a host-side purge
+> would report success having deleted nothing.
+>
+> **Correction (P6).** Better Auth's rate limiter used in-memory storage — a Phase 1 known
+> issue — so limits reset on every restart and were not shared between replicas. It now
+> uses the database.
+
+**Acceptance:** ① Automated tests prove cross-request access is impossible across the
+portal, the API, the upload path and the download paths, for portal sessions *and* between
+firms. ② An expired link, a revoked link and one that never existed are each refused and
+each audited with the reason. ③ Exceeding a limit returns 429 with `Retry-After` and
+`RateLimit-*`, and the requests before it do not. ④ **A real EICAR file scanned by real
+clamd → quarantined, deleted from storage, never downloadable by anyone, flagged in the UI
+and in the audit log with the signature name.** ⑤ With the antivirus profile off, files are
+visibly `skipped` — never silently unscanned. ⑥ Security headers on every page, a real CSP
+with a per-request nonce, and a *stricter* policy on uploaded files. ⑦ Retention purge
+removes the object from disk, verified by direct inspection, and keeps the record.
 
 **Demo script:**
 ```bash
-pnpm test:security                       # IDOR / token / rate-limit suite
-docker compose --profile antivirus up -d clamav
-curl -sS -F file=@fixtures/eicar.com "$PORTAL/api/upload?item=$ITEM" -b "$COOKIE"
-docker compose exec -T db psql -U gather -c "select scan_status from file order by id desc limit 1;"  # infected
-curl -sS -o /dev/null -w '%{http_code}\n' "$APP/api/file/$INFECTED_ID" -H "$AUTH"                     # 403
-for i in $(seq 1 200); do curl -s -o /dev/null -w '%{http_code} ' "$PORTAL"; done | tail -c 60        # 429s
-pnpm retention:purge --older-than 0d --confirm && docker compose exec -T web ls /data/uploads
+# ① ② ③ ⑤ ⑥ — no extra services needed
+docker compose -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.test.yml \
+  up -d --build
+pnpm test:security
+
+# ④ — real clamd, a real signature database, the real EICAR string
+docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+               -f docker-compose.test.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+  exec -T clamav clamdscan --version
+pnpm test:antivirus
+
+docker compose exec -T db psql -U gather -c "
+  select original_name, scan_status from file where scan_status = 'infected';"
+docker compose exec -T db psql -U gather -c "
+  select action, metadata->>'signature' from audit_event where action = 'file.quarantined';"
+
+# ⑦ — inside the container, because that is where the files are
+docker compose exec -T worker sh -lc 'find /app/data/uploads -type f | wc -l'
+docker compose exec -T worker node dist/cli/retention-purge.js --older-than 365d          # dry run
+docker compose exec -T worker node dist/cli/retention-purge.js --older-than 365d --confirm
+docker compose exec -T worker sh -lc 'find /app/data/uploads -type f | wc -l'
+docker compose exec -T db psql -U gather -c "
+  select original_name, size, purged_at is not null as purged from file where purged_at is not null;"
 ```
 
 ---
 
-### Phase 7 — Cloud + Stripe (live day 1)
+### Phase 7 — Cloud + Stripe ✅ shipped (2026-09-05, partially unproven)
 **Goal:** a real hosted product taking a real (test-mode) subscription.
 
-Tasks: `cloud/` layer — orgs/tenancy + isolation tests; Stripe Checkout + Billing Portal + webhooks
-(test mode); plan gating; Seziro admin panel; white-label domain + sending domain; team roles;
-retention policies; SMS via Twilio 10DLC (**start brand registration on day 1 of this phase**);
-e-sign via DocuSeal; sync to Drive/Dropbox/OneDrive; `docker-compose.prod.yml` + Caddy reverse
-proxy, all hostnames env-driven.
+Shipped: team roles and invitations (in the free product, not the paid one); tenancy isolation
+tests; Stripe Checkout + Billing Portal + webhooks; plan gating on seats and storage; the Seziro
+operator console at `/admin`; `docker-compose.prod.yml` + Caddy with automatic TLS, all hostnames
+env-driven; nightly `pg_dump` backups.
 
-⚠️ **Operator credentials required:** Stripe test keys; Twilio account + 10DLC brand; Google,
-Dropbox and Microsoft OAuth app credentials.
+**Deviations — recorded rather than drifted:**
 
-**Acceptance:** ① A real Stripe **test-mode** subscription created — `sub_…` id pasted into
-`progress.md`; webhook flips the plan; a gated feature visibly unlocks. ② Tenancy isolation tests
-prove org A cannot reach org B by any route. ③ An SMS **actually delivered to a real handset**
-(Twilio SID pasted). ④ OAuth against a **real** Google account, a completed request's files synced,
-Drive file ids pasted. ⑤ `docker-compose.prod.yml` brings the stack up behind Caddy with TLS on a
-test hostname.
+1. **No `cloud/` directory.** The hosted tier is `GATHER_CLOUD=true` plus four Stripe variables
+   over the same code. A parallel tree would have meant two codebases and a self-hosted product
+   that quietly rots — and the boundary is better enforced by `PLAN_DEFINITIONS.self_hosted`
+   having `null` for every limit than by a directory.
+2. **Team roles are free.** They were listed as a paid feature. A two-person firm self-hosting
+   needs them as much as a hosted one, and gating them would have broken the boundary rule.
+3. **SMS, e-sign and cloud-drive sync are deferred**, with reasons and prerequisites in §7.2.
+4. **An unsubscribed firm on the hosted tier gets the entry plan's limits**, never a lock-out.
+   Holding a firm's own documents hostage is not a business model this product will have.
+
+⚠️ **Operator credentials still required:** Stripe test keys. Everything else about the hosted
+tier runs today: `pnpm test:cloud` brings up the tier and proves the billing page, the seat
+limit, the operator console and the fact that the Subscribe button reaches Stripe — which
+answers, and refuses, because the credentials are placeholders.
+
+**Acceptance:** ① ⛔ **Not met — hard stop.** A real test-mode subscription needs a Stripe
+account. Procedure to close it: `docs/stripe-verification.md`. ② ✅ Tenancy isolation proven
+by `e2e/team.spec.ts` ③ and `packages/db/src/team.test.ts`. ③ ⛔ Deferred (SMS). ④ ⛔ Deferred
+(cloud-drive sync). ⑤ ✅ `docker-compose.prod.yml` + `docker/Caddyfile`, validated with
+`docker compose config`; a run on a real hostname needs a domain, which is a launch step.
 
 ---
 
@@ -1029,4 +1105,5 @@ Each phase is designed to start from a cleared context. Read `CLAUDE.md`, then t
 - ~~**Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`~~ — shipped.
 - ~~**Phase 4:** `Start Phase 4: Reminder engine — per plan.md §9.`~~ — shipped.
 - ~~**Phase 5:** `Start Phase 5: Approve/reject, dashboard, zip, audit export — per plan.md §9.`~~ — shipped.
-- **Phase 6:** `Start Phase 6: Security hardening pass — per plan.md §9.`
+- ~~**Phase 6:** `Start Phase 6: Security hardening pass — per plan.md §9.`~~ — shipped.
+- **Phase 7:** `Start Phase 7: Cloud + Stripe — per plan.md §9.`

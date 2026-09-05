@@ -11,6 +11,8 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/dist/**',
       '**/.next/**',
+      // Astro generates these from the content collections on every build.
+      'site/.astro/**',
       '**/drizzle/**',
       'artifacts/**',
       'coverage/**',

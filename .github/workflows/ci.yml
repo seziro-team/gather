@@ -128,6 +128,11 @@ jobs:
       - name: Run end-to-end tests
         run: pnpm test:e2e
 
+      # Named separately so a security regression is obvious in the checks list rather
+      # than buried in a count. Same stack; no extra services.
+      - name: Security suite
+        run: pnpm test:security
+
       - name: Container logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml -f docker-compose.mail.yml logs --no-color
@@ -218,6 +223,123 @@ jobs:
         if: failure()
         with:
           name: playwright-artifacts-s3
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7
+
+  cloud:
+    name: The hosted tier
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install oathtool
+        run: sudo apt-get update && sudo apt-get install -y oathtool
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # plan.md §9 Phase 7. Its own job because it needs GATHER_CLOUD=true, which the
+      # default stack deliberately does not have — team.spec.ts ④ asserts that a
+      # self-hosted install has no billing page and no operator console at all.
+      #
+      # The Stripe credentials in docker-compose.cloud.yml are placeholders, not keys.
+      # Everything runs except Stripe: the third test asserts that Subscribe reaches
+      # Stripe and that the refusal is shown to the user, which is what distinguishes a
+      # wired button from a dead one. Real checkout is docs/stripe-verification.md.
+      - name: Start Gather Cloud
+        run: |
+          cp .env.example .env
+          echo "GATHER_ADMIN_EMAILS=@seziro.test" >> .env
+
+      - name: Run the cloud suite
+        run: pnpm test:cloud
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.mail.yml \
+                         -f docker-compose.test.yml -f docker-compose.cloud.yml \
+                         logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts-cloud
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7
+
+  antivirus:
+    name: Quarantine an infected upload
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install oathtool
+        run: sudo apt-get update && sudo apt-get install -y oathtool
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # plan.md §9 Phase 6 acceptance ④. Its own job because ClamAV wants 3–4 GiB of RAM
+      # and downloads a ~350 MB signature database before clamd will answer — which is
+      # exactly why it is opt-in for a self-hoster too.
+      - name: Start Gather with ClamAV
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+                         -f docker-compose.test.yml up -d --build
+
+      - name: Wait for clamd and for Gather
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
+              docker compose -f docker-compose.yml -f docker-compose.antivirus.yml \
+                exec -T clamav clamdscan --version
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Gather did not become healthy"
+          docker compose -f docker-compose.yml -f docker-compose.antivirus.yml logs
+          exit 1
+
+      - name: Quarantine an EICAR upload
+        run: pnpm test:antivirus
+        env:
+          GATHER_TEST_ANTIVIRUS: '1'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.antivirus.yml logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts-antivirus
           path: |
             artifacts/
             playwright-report/

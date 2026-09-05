@@ -1035,3 +1035,351 @@ Entry template:
      merged.
 
 - **Next step (exact resume instruction):** `Start Phase 6: Security hardening pass — per plan.md §9.`
+
+---
+
+## 2026-09-05 — Phase 6: Security hardening pass
+
+- **Shipped:**
+  - **Rate limiting in Postgres**, not in memory — a limit that resets on restart and is
+    not shared between replicas is not a limit. One atomic upsert per request, so two
+    simultaneous requests cannot both read zero and both be allowed.
+  - **Virus scanning**, opt-in: real clamd over its INSTREAM protocol, written directly
+    (sixty lines) rather than shelling out to a binary Gather does not ship. An upload is
+    `pending` and undownloadable until it comes back; an infected one is **quarantined** —
+    row and audit event kept as evidence, bytes deleted, client told.
+  - **Security headers with a real CSP**, per-request nonce plus `strict-dynamic`, in
+    `proxy.ts`. Uploaded files keep their own far stricter `default-src 'none'; sandbox`.
+  - **Hardened upload sniffing**: markup is refused whatever it is named, and a file
+    claiming a format that always has a signature is refused when it has none.
+  - **`retention:purge`** — 16 CFR 314.4(c)(6) disposal that leaves the evidence behind.
+    Dry run by default; retention off by default.
+  - **`docs/threat-model.md`**, **`docs/safeguards-rule-mapping.md`** and
+    **`docs/incident-response.md`** — including, at length, what Gather does *not* do.
+  - **`e2e/security.spec.ts`** (6 tests) and **`e2e/antivirus.spec.ts`**, plus CI jobs.
+
+- **Real-world proof (what actually ran):**
+
+  ```
+  ✓ ① a portal session cannot reach another request, by any route          (23.1s)
+  ✓ ② an expired link is refused, a revoked link is refused, and both are
+      recorded                                                             (15.8s)
+  ✓ ③ too many uploads gets a 429 with the headers to act on               (12.0s)
+  ✓ ③b a magic-link flood is bounded even when callers cannot be told apart (10.9s)
+  ✓ ⑤ with no scanner configured, files say so rather than looking clean    (11.5s)
+  ✓ ⑥ every response carries the security headers, and uploads carry
+      stricter ones                                                        (12.9s)
+  6 passed
+
+  ✓ ④ an infected upload is quarantined, deleted, and never downloadable   (20.4s)
+  1 passed
+
+  Test Files 14 passed | Tests 182 passed        ← unit + integration, real Postgres
+  typecheck clean · lint clean · format clean
+  ```
+
+  **④ Real ClamAV, real signatures, the real EICAR string.** clamd reported its own
+  version and database serial before the run, so this is not a stub agreeing with itself:
+
+  ```
+  $ docker compose … exec -T clamav clamdscan --version
+  ClamAV 1.5.4/28108/Sun Aug 30 06:27:10 2026
+
+   scan_status | count |  bytes
+  -------------+-------+---------
+   clean       |     4 |  563260
+   infected    |     3 |     204
+   skipped     |    80 | 9846395
+
+   original_name | mime       | size | scan_status
+  ---------------+------------+------+-------------
+   statement.txt | text/plain |   68 | infected
+
+         action      |      signature       |     name
+  -------------------+----------------------+---------------
+   file.quarantined  | Eicar-Test-Signature | statement.txt
+  ```
+
+  The clean PDF in the same run came back `clean`, which is what makes the `infected`
+  meaningful — a scanner stuck on "everything is malware" would pass a test that only
+  checked the bad case.
+
+  **⑦ Disposal, by direct inspection.** A completed request's files, before and after:
+
+  ```
+  $ docker compose exec -T worker sh -lc 'ls -la /app/data/uploads/0b6a7471-…/'
+  -rw-------  1 gather gather  243549  750c083e-….bin
+  -rw-------  1 gather gather  140815  da4a50de-….bin
+
+  $ docker compose exec -T worker node dist/cli/retention-purge.js --older-than 365d --confirm
+  Disposed of 2 file(s). Records and audit trail kept.
+
+  $ docker compose exec -T worker sh -lc 'ls -la /app/data/uploads/0b6a7471-…/'
+  total 8                                     ← both objects gone
+
+   original_name   | hash_kept |  size  | purged
+  -----------------+-----------+--------+--------
+   irs-form-w9.pdf | t         | 140815 | t
+  ```
+
+  The bytes are gone; the name, size and SHA-256 remain, which is the difference between
+  disposal and deletion.
+
+- **Decisions & why:**
+  - **The rate-limit subject is a session wherever one exists, not an IP.** A family
+    sharing a router, an office behind one NAT and an entire country behind carrier-grade
+    NAT are all one address. Limiting them as one person breaks the product for exactly the
+    clients least able to work around it.
+  - **A limiter that cannot reach its store allows the request.** Gather is self-hosted by
+    firms whose alternative is email attachments; an outage that becomes a lockout is worse
+    than a minute of unlimited requests, and a database that is down means nothing else
+    works anyway. The failure is logged at `error`.
+  - **`X-Forwarded-For` is not believed by default.** With it trusted and no proxy in
+    front, anyone can set it and pick their own rate-limit bucket. An install behind a
+    proxy that has not set `GATHER_TRUST_PROXY` sees every request as coming from the
+    proxy — a visible, fixable problem rather than a silent bypass.
+  - **The infected file's bytes are deleted, not merely flagged.** A quarantine that keeps
+    a live copy of malware on the firm's server is a worse answer than one that does not.
+    The row and the audit event are the evidence.
+  - **`pending` is refused like `infected`.** On an install with a scanner, "we have not
+    looked yet" and "we looked and it was bad" are the same answer until the scan finishes.
+  - **Markup is refused outright rather than defended against.** An SVG can carry script;
+    `file-type` cannot see it because it is text. Rejecting it is stronger than any header,
+    and the headers are still there for everything else.
+  - **The CSP uses a nonce and `strict-dynamic`, not `unsafe-inline`.** Next injects inline
+    bootstrap scripts, so the alternative is no script policy at all — and a policy that
+    would not stop an injected script is not worth the header on a page that also holds
+    tax documents.
+  - **HSTS only over HTTPS.** Sending it on a plain-HTTP install would pin a browser to a
+    scheme that install does not serve, and a self-hoster on a LAN address would be locked
+    out of their own tool with no way to undo it.
+  - **Retention is off by default and the CLI is a dry run by default.** Deleting a firm's
+    client documents on a timer they did not set is not a decision Gather gets to make.
+
+- **Deviations from plan:** four, plus one correction, all written into `plan.md` §9 — two
+  magic-link buckets instead of one; a page rather than a 401 for a dead link; no separate
+  download origin; the purge running inside the container; and Better Auth's limiter moved
+  off in-memory storage.
+
+  Also worth recording: **four real defects were found by writing the acceptance tests.**
+
+  1. **The new CSP silently weakened file downloads.** `proxy.ts` set `default-src 'self'`
+     on every response — including the file routes, overwriting the `default-src 'none';
+     sandbox` that is the actual defence against an uploaded file executing. Caught by
+     test ⑥ within minutes of the proxy being added, which is precisely the argument for
+     asserting on headers rather than trusting that they are set.
+  2. **HTML renamed `.pdf` was accepted.** `file-type` reads binary signatures, so text
+     formats are invisible to it and the extension checks passed because the *extension*
+     was fine. Now markup is detected textually and a signature-bearing extension with no
+     signature is refused.
+  3. **The magic-link limit was a self-inflicted outage.** With no trusted proxy header
+     every caller shared one bucket at 20/minute — so the rate-limit test locked the two
+     tests after it out of their own portals. A firm sending thirty organizers in January
+     would have done the same to its clients.
+  4. **The first purge deleted eight files and recorded none of them.** `completedAt` was
+     selected through a raw `sql<Date>` fragment, which drizzle types but does not parse,
+     so it came back a string and `toISOString()` threw *after* the object was gone. The
+     column is now selected directly. The recovery worked as documented — both drivers
+     treat removing an absent object as success, so re-running completed the marking — but
+     the ordering decision is now written down rather than assumed.
+
+- **Known issues:**
+  1. **No key rotation.** If `GATHER_ENCRYPTION_KEY` is exposed, there is no supported way
+     to re-encrypt existing files. `docs/incident-response.md` says so plainly rather than
+     implying a procedure exists.
+  2. **The audit head hash is not anchored outside the database.** Catching a full database
+     compromise needs it printed, mailed or committed somewhere; Gather does not do that
+     for you, and the threat model says so.
+  3. **Scanning is inline with the upload request.** A 100 MB file on a slow clamd holds
+     the request open for its whole scan. Fine for tax documents; a queue would be better
+     for a firm collecting video.
+  4. **`ANTIVIRUS_DRIVER=clamav` lowers the upload ceiling to 25 MB** in the compose
+     overlay, because clamd's own `StreamMaxLength` defaults to that and refuses more. The
+     error message says so, but the two settings have to be raised together by hand.
+  5. **No CAPTCHA or proof-of-work anywhere.** Rate limits bound a brute-force; they do not
+     stop a distributed one. Put a reverse proxy in front.
+  6. **Rate-limit buckets are swept by the retention job**, so an install that never runs
+     it accumulates one row per bucket. Small, but unbounded.
+  7. Carried over: uploads cannot resume; no pagination; item drag cannot cross sections;
+     Resend unproven; Dependabot #4 (TypeScript 5.9 → 6.0.3) must not be merged.
+
+- **Next step (exact resume instruction):** `Start Phase 7: Cloud + Stripe — per plan.md §9.`
+
+---
+
+## 2026-09-05 — Phase 7: Cloud + Stripe
+
+- **Shipped:**
+  - **Team, in the free product.** Three roles (`owner`/`admin`/`member`) with ten named
+    permissions in `packages/core/src/permissions.ts`; invitations shaped exactly like
+    portal links — 32 bytes of CSPRNG, stored only as SHA-256, per-invite expiry,
+    revocable, single-use, every use audited. `/settings/team` to manage them,
+    `/join/<token>` to accept one. Sign-up now has a second shape: an invited colleague
+    with no account signs up **through** the invitation, which is also the only way past
+    `GATHER_ALLOW_SIGNUP` when an install is closed.
+  - **`?next=` handling** across sign-in and the second factor (`lib/next-path.ts`), so an
+    invitation link works for somebody who already has an account. Only same-origin paths
+    survive: an open redirect on a sign-in page is a phishing tool wearing a real
+    certificate.
+  - **The hosted tier**, as `GATHER_CLOUD=true` over the same code rather than a `cloud/`
+    fork. Stripe Checkout, Billing Portal and webhooks (`packages/billing`), plan gating on
+    seats and storage, `/settings/billing`, and the operator console at `/admin`.
+  - **`packages/db/src/admin.ts` — the only module in Gather that reads across firms.**
+    Deliberately one file, deliberately read-only, and every visit written to the audit log.
+  - **`docker-compose.prod.yml` + `docker/Caddyfile`:** automatic Let's Encrypt TLS, HSTS,
+    nothing but Caddy published, `GATHER_TRUST_PROXY` on because now there really is one,
+    and a nightly `pg_dump` keeping a fortnight.
+  - **`docker-compose.cloud.yml`** so the hosted tier can be run and tested before anybody
+    has a Stripe account, and `pnpm test:cloud` to do it.
+  - Docs: `docs/stripe-verification.md` — the procedure that closes the one hard stop.
+
+- **Real-world proof (what actually ran):**
+
+  ```
+  $ pnpm test:cloud
+    ✓ 1 [cloud] ① the hosted tier shows a real subscription state and real usage (5.7s)
+    ✓ 2 [cloud] ② the seat limit is enforced, counting invitations that have not been accepted (8.2s)
+    ✓ 3 [cloud] ③ Subscribe really calls Stripe, and says so when Stripe refuses (7.4s)
+    ✓ 4 [cloud] ④ the operator console lists every firm, and nobody else can open it (10.9s)
+    4 passed (34.0s)
+
+  $ npx playwright test --project=chromium team.spec.ts
+    ✓ 1 ① an invited colleague follows the link, joins the firm, and sees its work (20.4s)
+    ✓ 2 ② a member cannot change the team, and the server refuses even without a button (12.0s)
+    ✓ 3 ③ another firm cannot reach this firm’s request, client or exports (10.1s)
+    ✓ 4 ④ a self-hosted install has no billing page and no admin console (4.0s)
+    4 passed (48.5s)
+  ```
+
+  The Subscribe button reaches Stripe. This is the container log from test ③ — a real HTTPS
+  round trip to `api.stripe.com`, rejected because the credentials are placeholders:
+
+  ```
+  {"time":"2026-09-05T14:01:43.257Z","level":"error","name":"gather",
+   "msg":"could not start a Stripe checkout",
+   "error":"Invalid API Key provided: sk_test_*****************************_yet"}
+  ```
+
+  The invitation is a real email over real SMTP, asserted from Mailpit's API by
+  `team.spec.ts` ①, not from a log line.
+
+  The audit trail after the phase's runs, straight out of Postgres:
+
+  ```
+  $ docker compose exec -T db psql -U gather -d gather -Atc \
+      "select action, count(*) from audit_event
+        where action like 'firm.member%' or action like 'admin.%' group by action order by 1"
+  admin.console_viewed|5
+  firm.member_added|243
+  firm.member_invited|14
+  firm.member_role_changed|1
+  ```
+
+  The operator console reading 241 firms across the whole install — the only cross-tenant
+  query there is — while `team.spec.ts` ③ proves a signed-in user of firm B gets 403/404 on
+  every one of firm A's URLs and finds none of A's text in any response body.
+
+  `packages/db/src/team.test.ts`: 9 integration tests against real Postgres covering
+  single-use invitations, expiry, revocation, cross-firm refusal of every mutation, seat
+  counting including pending invitations, and the subscription upsert. Full suite:
+  **18 files, 232 tests, all passing.**
+
+- **Decisions & why:**
+  1. **No `cloud/` directory.** plan.md §9 called for one. A parallel tree means two
+     codebases and a self-hosted product that quietly rots, and the boundary is enforced far
+     better by `PLAN_DEFINITIONS.self_hosted` having `null` for every limit than by a folder.
+     `null` means "no meter exists" — a large number would be a meter somebody could turn
+     down later.
+  2. **Team roles ship free.** They were priced as a paid feature. A two-person firm
+     self-hosting needs them exactly as much as a hosted one; gating them would have broken
+     the boundary rule in §7.2, which is the rule the whole business model rests on.
+  3. **A firm is never locked out.** On the hosted tier a firm with no live subscription —
+     still deciding, or stopped paying — gets the entry plan's limits, not a wall. Their
+     documents stay reachable and exportable. The alternative is holding a firm's client
+     files hostage, which is not a business this product will be in, so it is a constant in
+     `lib/cloud.ts` rather than a promise in a FAQ.
+  4. **Only the webhook may change a plan.** The redirect back from Checkout deliberately
+     writes nothing, so a client that closes the tab cannot leave a firm unsubscribed and
+     one that forges the return cannot leave them subscribed. A bad signature gets 401, not
+     5xx: Stripe retries 5xx, and a signature that does not verify never will.
+  5. **The env refuses to boot with billing half-configured.** `GATHER_CLOUD=true` without
+     all four Stripe values is a startup failure. A payment button that errors is worse than
+     no payment button.
+  6. **`GATHER_ADMIN_EMAILS` accepts `@domain`.** An operator's staff list changes more often
+     than their deployment does. Documented with the obvious warning: Gather does not verify
+     addresses at sign-up, so only list a domain whose mailboxes you control.
+  7. **`/admin` is `notFound()`, not 403.** Somebody who is not an operator should not learn
+     there is an operator console. On a self-hosted install the list is empty and the route
+     does not exist for anyone — there is no Seziro back door into a firm's data.
+
+  **Five real defects were found by writing the acceptance tests:**
+
+  1. **An invited colleague could not sign up at all.** `isSignupAllowed()` is
+     `first-user-only` by default, so on any real install the invitation link led to
+     "Sign-ups are closed". The entire team feature was unreachable end to end. Sign-up now
+     has an invitation branch, checked server-side against the token rather than trusted
+     from the query string.
+  2. **The operator console threw on every page load.** `db.execute` does no column mapping
+     — drizzle turns off node-postgres's date parsing so it can apply its own types — so a
+     raw-SQL timestamp arrived as `'2026-09-05 13:38:11.352+00'` and `.getTime()` threw,
+     having typechecked perfectly against a `Date` I had written into the interface myself.
+     Timestamps are now selected as epoch seconds and converted in one place. **This is the
+     same defect as Phase 6's purge bug**, which is why `team.test.ts` now asserts
+     `toBeInstanceOf(Date)` rather than trusting the type.
+  3. **The console disagreed with the billing page about what a firm was on.** One read the
+     database's `effective_plan`, the other the install's policy. Now both call
+     `applicablePlan`.
+  4. **The Dockerfile did not build `@gather/billing`,** so the image failed at `next build`
+     the first time the cloud code was imported. Caught by the container build, which is the
+     only place it could have been.
+  5. **`e2e/auth.spec.ts` had been asserting on a heading deleted in Phase 5.** The
+     dashboard's "Audit trail" became "Recent activity"; the test had been failing ever
+     since and was recorded as an environment problem. It was not. Fixed, and worth
+     recording as a caution about attributing a red test to flakiness.
+
+- **Deviations from plan:**
+  1. **SMS reminders, e-signature and Drive/Dropbox/OneDrive sync are not built.** plan.md
+     §7.2 listed all three on Cloud Pro. Each needs a third-party account nobody has: a
+     registered A2P 10DLC brand (days to weeks of carrier registration, real per-message
+     cost), a DocuSeal deployment, and OAuth applications reviewed at three separate
+     vendors. They were **cut rather than stubbed** — writing three integrations that have
+     never once run against the real API and then listing them on a pricing page is exactly
+     what CLAUDE.md §4 forbids, and a customer discovering an advertised feature does not
+     work is worse than one who never saw it offered. plan.md §7.2 now records the cut, what
+     each needs, and that Cloud Pro is consequently a capacity tier: ten seats and 100 GB
+     rather than three and 25 GB. `FEATURES` in `plans.ts` contains only what exists,
+     because the site's pricing table is generated from it.
+  2. **White-label domains** were in the same table and are also not built. Firms do get
+     their name and brand colour on the portal — on every tier, including self-hosted.
+  3. `cloud/` directory → an environment flag (decision 1).
+  4. Team roles moved from paid to free (decision 2).
+
+- **Known issues:**
+  1. ⛔ **Stripe has never completed a call.** Checkout, the portal and the webhook are
+     written against the official SDK with the API version pinned, the webhook logic is unit
+     tested, and the button provably reaches Stripe — but no subscription has ever been
+     created. `docs/stripe-verification.md` is the seven-step procedure that closes this,
+     and it needs a Stripe test-mode account. **Until it is run, "Gather Cloud works" is not
+     a claim this repo may make.**
+  2. **One firm per person.** `getMembership` takes the first row, so somebody invited to a
+     second firm keeps the first. Fine for accountants, wrong for a bookkeeper serving two
+     practices. Needs a firm switcher.
+  3. **The storage limit is a pre-check, not a hard stop.** The portal upload route asks
+     `checkUploadFits` before accepting a file and answers 507 with an explanation the client
+     can act on — but it trusts `Content-Length` to decide, so a client that lies about the
+     length can overshoot by one file. The per-file ceiling is still enforced while
+     streaming; only the plan total can be passed, and only by that much.
+  4. **The prod stack has never run on a real hostname.** `docker compose config` validates
+     and Caddy's config is written, but nobody has pointed DNS at it and watched ACME issue
+     a certificate. That is a launch step, not a code step.
+  5. **Backups are local.** `docker-compose.prod.yml` writes nightly dumps into a volume on
+     the same machine as the database. Copying them somewhere else is the operator's job and
+     the README says so rather than implying disaster recovery.
+  6. **The operator console has no pagination** — 200 firms, newest first, then nothing.
+  7. Carried over from Phase 6: no key rotation; the audit head is not anchored outside the
+     database; scanning is inline with the upload; `ANTIVIRUS_DRIVER=clamav` lowers the
+     upload ceiling to 25 MB; no CAPTCHA; uploads cannot resume; no pagination on requests;
+     item drag cannot cross sections; Resend unproven; Dependabot #4 (TypeScript 5.9 → 6.0.3)
+     must not be merged.
+
+- **Next step (exact resume instruction):** `Start Phase 8: site, README, launch — per plan.md §9.`
