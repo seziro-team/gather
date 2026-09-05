@@ -1546,10 +1546,22 @@ Entry template:
   3. `site/` is a pnpm workspace package rather than a standalone directory, so one
      `pnpm build` covers it.
 
-  **A second defect, this one in the harness rather than the product.** The reminder suite
-  had been reading Mailpit at a hard-coded `127.0.0.1:8026` — the port one machine happened
-  to need because 8025 was taken on it. Everywhere else, including CI, mailpit is on 8025
-  and every mail test failed with `ECONNREFUSED`. It now derives the port from
+  **Two more, both in the harness rather than the product** — and both the same shape: a
+  test that passed here and could not have passed anywhere else.
+
+  The end-to-end job had never built the audit verifier. `review.spec.ts` ⑤ runs
+  `pnpm verify:audit --csv` from the *host*, which is the whole claim — somebody with no
+  access to Gather and no database can recompute every hash — but the job only built the
+  Docker image, so `packages/db/dist/cli/verify-audit.js` did not exist on the runner. It
+  passed locally because a previous `pnpm build` had left `dist/` lying around. Worth
+  recording that the obvious fix, `pnpm --filter ...@gather/db build`, is wrong: that
+  selector starts the package and its dependencies together, db compiles against a
+  `core/dist` that is not there yet, and **tsc emits anyway** — leaving a half-built CLI and
+  a green tick. Two explicit ordered steps instead.
+
+  And the reminder suite had been reading Mailpit at a hard-coded `127.0.0.1:8026` — the
+  port one machine happened to need because 8025 was taken on it. Everywhere else, CI
+  included, mailpit is on 8025, and every mail test failed with `ECONNREFUSED`. It now derives the port from
   `MAILPIT_UI_PORT`, the same variable the compose overlay publishes on, and that variable
   is documented in `.env.example` rather than living only in one person's `.env`.
 
