@@ -2,9 +2,11 @@ import { Readable } from 'node:stream';
 import type { NextRequest } from 'next/server';
 import { appendAuditEvent, filesForDownload, getDb } from '@gather/db';
 import { buildArchive, buildManifest, sanitize } from '@/lib/archive';
+import { downloadable } from '@/lib/files';
 import { currentActor } from '@/lib/actor';
 import { getRequest } from '@/lib/requests';
 import { requireReadyUser } from '@/lib/session';
+import { limit, tooManyRequests } from '@/lib/throttle';
 
 /**
  * Everything a client sent, as one zip.
@@ -32,10 +34,19 @@ export async function GET(
   const found = await getRequest(membership.firm.id, id);
   if (!found) return new Response('Not found', { status: 404 });
 
+  // Tighter than a single-file download: building one of these reads and decrypts every
+  // file in the request.
+  const limited = await limit('request.download', membership.firm.id);
+  if (!limited.ok) return tooManyRequests(limited, 'request.download');
+
   const includeSuperseded = request.nextUrl.searchParams.get('include') === 'all';
   const all = await filesForDownload(getDb(), id);
-  const included = includeSuperseded ? all : all.filter((entry) => entry.current);
-  const skipped = includeSuperseded ? [] : all.filter((entry) => !entry.current);
+  // A quarantined or still-unscanned file never goes into an archive. The single-file
+  // download route refuses them, and an archive that quietly included one would be a way
+  // around that.
+  const safe = all.filter((entry) => downloadable(entry.file));
+  const included = includeSuperseded ? safe : safe.filter((entry) => entry.current);
+  const skipped = includeSuperseded ? [] : safe.filter((entry) => !entry.current);
 
   if (included.length === 0) {
     return new Response('This request has no files to download yet.', { status: 404 });

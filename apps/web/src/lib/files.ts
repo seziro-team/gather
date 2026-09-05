@@ -66,6 +66,25 @@ export async function removeStoredObject(driverName: string, key: string): Promi
   await storageForDriver(driverName).remove(key);
 }
 
+/**
+ * Whether a file may leave Gather.
+ *
+ * `clean` always may. `skipped` may, because no scanner was configured and the UI says so
+ * — refusing would mean a default install could collect documents and never hand them
+ * back. `infected` and `pending` may not: one is known bad, and the other is *unknown*,
+ * which on an install that has a scanner is the same answer until the scan finishes.
+ */
+export function downloadable(row: FileRow): boolean {
+  return row.scanStatus === 'clean' || row.scanStatus === 'skipped';
+}
+
+export function refusedBecause(row: FileRow): string {
+  if (row.scanStatus === 'infected') {
+    return 'This file was found to contain malware and cannot be downloaded.';
+  }
+  return 'This file has not finished being scanned yet. Try again in a moment.';
+}
+
 /** RFC 6266 / RFC 5987: an ASCII fallback plus the real name for anything that can read it. */
 function contentDisposition(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');

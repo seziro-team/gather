@@ -160,15 +160,24 @@ export function FileUpload({
                 {file.name}
               </span>
               <span className="text-xs text-slate-500">{formatBytes(file.size)}</span>
+              {file.scanStatus === 'infected' ? (
+                <span className="text-xs font-medium text-red-700">
+                  Not accepted — this file contained malware
+                </span>
+              ) : file.scanStatus === 'pending' ? (
+                <span className="text-xs text-slate-500">Being checked…</span>
+              ) : null}
               <div className="ml-auto flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => download(file.id)}
-                  disabled={isPending}
-                  className="text-brand-700 min-h-11 px-2 text-sm font-medium underline"
-                >
-                  Download
-                </button>
+                {file.scanStatus === 'clean' || file.scanStatus === 'skipped' ? (
+                  <button
+                    type="button"
+                    onClick={() => download(file.id)}
+                    disabled={isPending}
+                    className="text-brand-700 min-h-11 px-2 text-sm font-medium underline"
+                  >
+                    Download
+                  </button>
+                ) : null}
                 {disabled ? null : (
                   <button
                     type="button"

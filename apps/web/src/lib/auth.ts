@@ -81,7 +81,11 @@ function createAuth() {
     },
 
     rateLimit: {
-      enabled: true,
+      enabled: config.GATHER_AUTH_RATE_LIMIT,
+      // In Postgres, not in memory. In-memory limits reset on every restart and are not
+      // shared between replicas, so "five sign-in attempts a minute" was really five per
+      // container per deploy — which is not a limit. See migration 0004.
+      storage: 'database',
       window: 60,
       max: 60,
       customRules: {

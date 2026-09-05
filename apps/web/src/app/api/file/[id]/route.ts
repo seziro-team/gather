@@ -1,8 +1,16 @@
 import { and, eq } from 'drizzle-orm';
 import type { NextRequest } from 'next/server';
 import { findRequestFile, getDb, request as requestTable } from '@gather/db';
-import { checkFileDownload, fileResponse, firmScope, openFile } from '@/lib/files';
+import {
+  checkFileDownload,
+  downloadable,
+  fileResponse,
+  firmScope,
+  openFile,
+  refusedBecause,
+} from '@/lib/files';
 import { requireReadyUser } from '@/lib/session';
+import { limit, tooManyRequests } from '@/lib/throttle';
 
 /**
  * The firm downloading what a client sent in.
@@ -23,6 +31,9 @@ export async function GET(
   const { id } = await context.params;
   const { membership } = await requireReadyUser();
 
+  const limited = await limit('file.download', membership.firm.id);
+  if (!limited.ok) return tooManyRequests(limited, 'file.download');
+
   if (!checkFileDownload(id, firmScope(membership.firm.id), request.nextUrl.searchParams)) {
     return new Response('That download link has expired. Reload the page and try again.', {
       status: 403,
@@ -39,6 +50,12 @@ export async function GET(
 
   const found = await findRequestFile(getDb(), requestId, id);
   if (!found) return new Response('Not found', { status: 404 });
+
+  // A quarantined file is refused to the firm too. "The firm asked for it" is not a reason
+  // to hand somebody a file a scanner has identified as malware.
+  if (!downloadable(found.file)) {
+    return new Response(refusedBecause(found.file), { status: 403 });
+  }
 
   return fileResponse(await openFile(found.file), found.file);
 }

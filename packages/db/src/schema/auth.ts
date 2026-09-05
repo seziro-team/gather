@@ -1,4 +1,13 @@
-import { boolean, index, integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 
 /**
  * Better Auth tables.
@@ -114,4 +123,26 @@ export const twoFactor = pgTable(
     index('two_factor_secret_idx').on(table.secret),
     index('two_factor_user_id_idx').on(table.userId),
   ],
+);
+
+/**
+ * Better Auth's own rate-limit store.
+ *
+ * Exists so `rateLimit.storage: 'database'` has somewhere to write. Until Phase 6 the
+ * limiter used in-memory storage, which meant limits reset on every restart and were not
+ * shared between replicas — so five sign-in attempts became five *per container per
+ * deploy*, which is not a limit.
+ *
+ * `lastRequest` is epoch milliseconds as a `bigint`, because that is what Better Auth
+ * writes; it reads it back through `Number()`.
+ */
+export const rateLimit = pgTable(
+  'rate_limit',
+  {
+    id: text().primaryKey(),
+    key: text().notNull(),
+    count: integer().notNull(),
+    lastRequest: bigint({ mode: 'number' }).notNull(),
+  },
+  (table) => [uniqueIndex('rate_limit_key_idx').on(table.key)],
 );

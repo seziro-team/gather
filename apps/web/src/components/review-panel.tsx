@@ -53,6 +53,38 @@ const STATUS: Record<string, { label: string; tone: 'green' | 'amber' | 'red' | 
   pending: { label: 'Not sent yet', tone: 'neutral' },
 };
 
+/**
+ * What a scanner said about a file, in words.
+ *
+ * `clean` gets nothing: a green tick on every row is noise, and the absence of a warning
+ * is the message. Everything else is worth reading — especially `skipped`, which is the
+ * default install and means nobody looked.
+ */
+function ScanBadge({ status }: { status: string }) {
+  if (status === 'clean') return null;
+
+  if (status === 'infected') {
+    return (
+      <Badge tone="red" title="This file was found to contain malware and has been deleted.">
+        Infected — quarantined
+      </Badge>
+    );
+  }
+
+  if (status === 'pending') {
+    return <Badge tone="amber">Being scanned</Badge>;
+  }
+
+  return (
+    <span
+      className="text-xs text-slate-500"
+      title="No virus scanner is configured on this install. Turn on the antivirus profile to have uploads scanned."
+    >
+      Not scanned
+    </span>
+  );
+}
+
 export function ReviewPanel({
   requestId,
   sections,
@@ -273,14 +305,7 @@ export function ReviewPanel({
                             <span className="min-w-0 text-sm break-words">{file.name}</span>
                             <span className="text-xs text-slate-500">{formatBytes(file.size)}</span>
                             {file.current ? null : <Badge>Replaced (v{file.version})</Badge>}
-                            {file.scanStatus === 'skipped' ? (
-                              <span
-                                className="text-xs text-slate-500"
-                                title="No virus scanner is configured on this install."
-                              >
-                                Not scanned
-                              </span>
-                            ) : null}
+                            <ScanBadge status={file.scanStatus} />
                             <span
                               className="font-mono text-xs text-slate-300"
                               title={`sha256 ${file.sha256}`}
@@ -288,11 +313,18 @@ export function ReviewPanel({
                               {file.sha256.slice(0, 10)}
                             </span>
                             <span className="ml-auto">
-                              <DownloadButton
-                                requestId={requestId}
-                                fileId={file.id}
-                                name={file.name}
-                              />
+                              {file.scanStatus === 'clean' || file.scanStatus === 'skipped' ? (
+                                <DownloadButton
+                                  requestId={requestId}
+                                  fileId={file.id}
+                                  name={file.name}
+                                />
+                              ) : (
+                                // Not offered at all, rather than offered and refused. The
+                                // download route refuses it too — but a button that always
+                                // fails is a worse answer than no button.
+                                <span className="text-xs text-slate-400">Not available</span>
+                              )}
                             </span>
                           </li>
                         ))}

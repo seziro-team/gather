@@ -3,6 +3,9 @@ import { env, type Env } from '@gather/core';
 import { parseMasterKey } from './crypto.js';
 import type { StorageDriver } from './driver.js';
 import { LocalStorage } from './local.js';
+import { ClamAv } from './clamav.js';
+import type { ScanVerdict } from './clamav.js';
+import { openStored, type OpenStoredInput } from './pipeline.js';
 import { S3Storage } from './s3.js';
 
 export {
@@ -96,4 +99,45 @@ const globalRef = globalThis as typeof globalThis & { __gatherStorage?: StorageS
 export function getStorage(): StorageDriver {
   globalRef.__gatherStorage ??= { driver: createStorage() };
   return globalRef.__gatherStorage.driver;
+}
+
+export { ClamAv, type ClamAvOptions, type ScanVerdict } from './clamav.js';
+
+/**
+ * The virus scanner, or `null` when none is configured.
+ *
+ * `null` is a supported state, not a missing dependency — see `ANTIVIRUS_DRIVER` in
+ * @gather/core. Callers treat it as "mark the file `skipped` and say so in the UI",
+ * never as "assume clean".
+ */
+export function createScanner(config: Env = env()): ClamAv | null {
+  if (config.ANTIVIRUS_DRIVER !== 'clamav') return null;
+  return new ClamAv({
+    host: config.CLAMAV_HOST,
+    port: config.CLAMAV_PORT,
+    timeoutMs: config.CLAMAV_TIMEOUT_MS,
+  });
+}
+
+interface ScannerSingleton {
+  scanner: ClamAv | null;
+}
+
+const scannerRef = globalThis as typeof globalThis & { __gatherScanner?: ScannerSingleton };
+
+export function getScanner(): ClamAv | null {
+  scannerRef.__gatherScanner ??= { scanner: createScanner() };
+  return scannerRef.__gatherScanner.scanner;
+}
+
+/**
+ * Scan an object that has already been stored.
+ *
+ * Reads it back through the decryptor rather than teeing the upload stream. That costs one
+ * extra read of a file that is almost always under 25 MB, and buys a stronger guarantee:
+ * what is scanned is exactly what is on the disk, not a copy of it that passed through the
+ * same process a moment earlier.
+ */
+export async function scanStored(input: OpenStoredInput, scanner: ClamAv): Promise<ScanVerdict> {
+  return scanner.scan(await openStored(input));
 }

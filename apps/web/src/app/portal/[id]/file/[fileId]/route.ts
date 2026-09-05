@@ -1,7 +1,15 @@
 import type { NextRequest } from 'next/server';
 import { findRequestFile, getDb } from '@gather/db';
-import { checkFileDownload, fileResponse, openFile, portalScope } from '@/lib/files';
+import {
+  checkFileDownload,
+  downloadable,
+  fileResponse,
+  openFile,
+  portalScope,
+  refusedBecause,
+} from '@/lib/files';
 import { currentPortal } from '@/lib/portal';
+import { limit, tooManyRequests } from '@/lib/throttle';
 
 /**
  * A client downloading something they uploaded.
@@ -29,6 +37,9 @@ export async function GET(
   const portal = await currentPortal(id);
   if (!portal) return new Response('Link expired', { status: 401 });
 
+  const limited = await limit('file.download', portal.sessionId);
+  if (!limited.ok) return tooManyRequests(limited, 'file.download');
+
   if (!checkFileDownload(fileId, portalScope(portal.request.id), request.nextUrl.searchParams)) {
     return new Response('That download link has expired. Reload the page and try again.', {
       status: 403,
@@ -37,6 +48,10 @@ export async function GET(
 
   const owned = await findRequestFile(getDb(), portal.request.id, fileId);
   if (!owned) return new Response('Not found', { status: 404 });
+
+  if (!downloadable(owned.file)) {
+    return new Response(refusedBecause(owned.file), { status: 403 });
+  }
 
   return fileResponse(await openFile(owned.file), owned.file);
 }

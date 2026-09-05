@@ -1,6 +1,7 @@
 import { appendAuditEvent, auditCsv, getDb, readAuditTrail, verifyAuditRows } from '@gather/db';
 import { currentActor } from '@/lib/actor';
 import { requireReadyUser } from '@/lib/session';
+import { limit, tooManyRequests } from '@/lib/throttle';
 
 /**
  * The firm's whole audit trail, as CSV.
@@ -22,6 +23,9 @@ function parseDate(value: string | null): Date | undefined {
 
 export async function GET(request: Request): Promise<Response> {
   const { membership } = await requireReadyUser();
+
+  const limited = await limit('audit.export', membership.firm.id);
+  if (!limited.ok) return tooManyRequests(limited, 'audit.export');
   const params = new URL(request.url).searchParams;
 
   const from = parseDate(params.get('from'));

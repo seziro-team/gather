@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { env } from '@gather/core';
 import { openPortalLink, portalPath, PORTAL_COOKIE } from '@/lib/portal';
+import { clientAddress, limitCaller, tooManyRequests } from '@/lib/throttle';
 
 /**
  * The magic link a client clicks.
@@ -21,11 +22,17 @@ const REASONS = {
 } as const;
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: RouteContext<'/p/[token]'>,
 ): Promise<Response> {
   const { token } = await context.params;
   const config = env();
+
+  // Per IP where the caller can be identified, and a much higher shared ceiling where they
+  // cannot — see clientAddress. This is the one path with no session yet, and the only one
+  // where the thing being limited is somebody guessing.
+  const { limited, scope } = await limitCaller('portal.open', clientAddress(request.headers));
+  if (!limited.ok) return tooManyRequests(limited, scope);
 
   const opened = await openPortalLink(token);
   if (!opened.ok) {

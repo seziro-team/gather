@@ -101,6 +101,74 @@ const COMPATIBLE_WITH: Record<string, readonly string[]> = {
   pages: ['pages', 'zip'],
 };
 
+/**
+ * Formats that always begin with a signature `file-type` can find.
+ *
+ * If a file claims one of these and nothing was detected, the claim is false — the bytes
+ * are not what the name says. That was found by a test uploading HTML named `.pdf`: no
+ * binary signature, so `file-type` reported nothing, and the file sailed through the
+ * extension checks because the *extension* was fine.
+ */
+const SIGNATURE_EXTENSIONS = new Set([
+  'pdf',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'tif',
+  'tiff',
+  'heic',
+  'heif',
+  'bmp',
+  'zip',
+  'docx',
+  'xlsx',
+  'pptx',
+  'odt',
+  'ods',
+  'doc',
+  'xls',
+  'ppt',
+  'msg',
+  'rtf',
+  'mp4',
+  'mov',
+]);
+
+/**
+ * Is this markup a browser would execute?
+ *
+ * `file-type` reads binary signatures, so HTML, SVG and XML are invisible to it — they are
+ * text. Blocking them by extension alone means renaming `evil.svg` to `evil.pdf` gets it
+ * past, which is exactly what happens without this.
+ *
+ * The file is still never rendered in Gather's origin (downloads are always an attachment
+ * with `default-src 'none'; sandbox`). This is the layer before that one: the firm's own
+ * machine, where somebody double-clicks it out of their downloads folder and it opens in a
+ * browser with a `file://` origin that no header of ours controls.
+ */
+function looksLikeMarkup(head: Uint8Array): boolean {
+  // Enough to see a doctype or a root element, and short enough that a large binary file
+  // whose first kilobyte happens to contain "<html" in a comment is not misjudged.
+  const start = Buffer.from(head.subarray(0, 512))
+    .toString('utf8')
+    // A UTF-8 or UTF-16 BOM, and any leading whitespace.
+    .replace(/^\uFEFF/, '')
+    .trimStart()
+    .toLowerCase();
+
+  return (
+    start.startsWith('<!doctype html') ||
+    start.startsWith('<html') ||
+    start.startsWith('<svg') ||
+    start.startsWith('<?xml') ||
+    start.startsWith('<!entity') ||
+    // A fragment with no root element, which is still executed by a browser.
+    /^<(script|iframe|object|embed|body|head)\b/.test(start)
+  );
+}
+
 export class UploadRejected extends Error {
   constructor(
     message: string,
@@ -186,6 +254,16 @@ export async function sniffUpload(input: SniffInput): Promise<SniffResult> {
     );
   }
 
+  // Before anything else that reads bytes: markup is text, so `file-type` cannot see it,
+  // and blocking `.svg` by name alone means renaming it to `.pdf` gets it through.
+  if (looksLikeMarkup(input.head)) {
+    throw new UploadRejected(
+      'This file is a web page or an image with code in it, whatever it is named. ' +
+        'Gather does not accept those — send a document or a photo instead.',
+      'blocked-type',
+    );
+  }
+
   const detected = await fileTypeFromBuffer(input.head);
   const detectedExtension = detected?.ext.toLowerCase() ?? null;
 
@@ -210,6 +288,16 @@ export async function sniffUpload(input: SniffInput): Promise<SniffResult> {
   if (detectedExtension && declared !== '' && !matches(declared, detectedExtension)) {
     throw new UploadRejected(
       `This file is named .${declared} but its contents are a .${detectedExtension} file. ` +
+        'Check you picked the right one.',
+      'content-mismatch',
+    );
+  }
+
+  // A name that promises a format with a signature, and no signature found. The bytes are
+  // not what the name says, and there is no benign version of that.
+  if (!detected && SIGNATURE_EXTENSIONS.has(declared)) {
+    throw new UploadRejected(
+      `This file is named .${declared}, but its contents are not a .${declared} file. ` +
         'Check you picked the right one.',
       'content-mismatch',
     );

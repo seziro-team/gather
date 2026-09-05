@@ -152,3 +152,62 @@ describe('sniffUpload', () => {
     expect(error.reason).toBe('empty-name');
   });
 });
+
+describe('markup and mislabelled files', () => {
+  /**
+   * `file-type` reads binary signatures, so HTML, SVG and XML are invisible to it — they
+   * are text. Both of these were found by an end-to-end test that renamed a payload and
+   * watched it sail through, and both are the layer *before* the response headers: the
+   * firm's own machine, where somebody opens a download in a browser with a `file://`
+   * origin that no header of ours controls.
+   */
+  it('refuses markup whatever it is named', async () => {
+    const cases: [string, string][] = [
+      ['logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'],
+      ['statement.pdf', '<html><script>alert(1)</script></html>'],
+      ['receipt.png', '<!DOCTYPE html><html><body>hi</body></html>'],
+      ['export.csv', '  \n\t<?xml version="1.0"?><root/>'],
+      ['fragment.txt', '<script>alert(1)</script>'],
+    ];
+
+    for (const [filename, body] of cases) {
+      await expect(
+        sniffUpload({ head: Buffer.from(body), filename }),
+        `${filename} was accepted`,
+      ).rejects.toThrow(/does not accept|not a \./);
+    }
+  });
+
+  it('refuses a name that promises a signature the bytes do not have', async () => {
+    await expect(
+      sniffUpload({ head: Buffer.from('this is just some text'), filename: 'return.pdf' }),
+    ).rejects.toThrow(/named \.pdf, but its contents are not a \.pdf file/);
+
+    await expect(
+      sniffUpload({ head: Buffer.from('not an image at all'), filename: 'photo.jpg' }),
+    ).rejects.toThrow(/not a \.jpg file/);
+  });
+
+  it('still accepts the text formats a bookkeeper is actually sent', async () => {
+    // These genuinely have no signature — a CSV is bytes that happen to have commas in —
+    // so they are allowed on their extension alone and stored as text/plain.
+    for (const filename of ['transactions.csv', 'statement.ofx', 'notes.txt', 'ledger.qbo']) {
+      const result = await sniffUpload({
+        head: Buffer.from('Date,Description,Amount\n2026-01-04,Rent,-1200.00\n'),
+        filename,
+      });
+      expect(result.mime, filename).toBe('text/plain');
+    }
+  });
+
+  it('does not mistake a real document that mentions markup for markup', async () => {
+    // A PDF whose first bytes are a proper signature, with `<html` later in the file.
+    const pdf = Buffer.concat([
+      Buffer.from('%PDF-1.7\n'),
+      Buffer.from('% a comment mentioning <html> and <script> inside the document\n'),
+      Buffer.from('1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF'),
+    ]);
+    const result = await sniffUpload({ head: pdf, filename: 'return.pdf' });
+    expect(result.mime).toBe('application/pdf');
+  });
+});

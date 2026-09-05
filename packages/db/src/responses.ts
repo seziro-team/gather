@@ -190,6 +190,8 @@ export interface RecordFileInput {
   iv: string | null;
   tag: string | null;
   uploadedIp: string | null;
+  /** `pending` when a scanner will look at it, `skipped` when none is configured. */
+  scanStatus: 'pending' | 'skipped';
 }
 
 export async function recordFile(tx: DbTransaction, input: RecordFileInput): Promise<FileRow> {
@@ -197,14 +199,36 @@ export async function recordFile(tx: DbTransaction, input: RecordFileInput): Pro
     .insert(file)
     .values({
       ...input,
-      // Phase 6 adds the ClamAV profile. Until then this is honest rather than optimistic:
-      // nothing scanned the bytes, and the UI says so instead of implying a clean result.
-      scanStatus: 'skipped',
+      // `pending` when a scanner is configured — the file is unreadable until it comes
+      // back clean. `skipped` when none is, which is honest rather than optimistic:
+      // nothing looked at the bytes, and the UI says exactly that instead of implying a
+      // clean result.
+      scanStatus: input.scanStatus,
     })
     .returning();
   const row = inserted[0];
   if (!row) throw new Error('file insert returned no row');
   return row;
+}
+
+/**
+ * Record what the scanner decided.
+ *
+ * Separate from `recordFile` because the scan happens after the bytes are stored — the
+ * file exists, unreadable, while clamd looks at it. Returns the updated row so the caller
+ * can audit the transition without a second read.
+ */
+export async function setScanStatus(
+  db: Database | DbTransaction,
+  fileId: string,
+  status: 'clean' | 'infected' | 'skipped' | 'pending',
+): Promise<FileRow | null> {
+  const updated = await db
+    .update(file)
+    .set({ scanStatus: status })
+    .where(eq(file.id, fileId))
+    .returning();
+  return updated[0] ?? null;
 }
 
 export async function deleteFileRow(tx: DbTransaction, fileId: string): Promise<FileRow | null> {

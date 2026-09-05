@@ -2,6 +2,7 @@ import { appendAuditEvent, auditCsv, getDb, readAuditTrail, verifyAuditRows } fr
 import { currentActor } from '@/lib/actor';
 import { getRequest } from '@/lib/requests';
 import { requireReadyUser } from '@/lib/session';
+import { limit, tooManyRequests } from '@/lib/throttle';
 
 /**
  * One request's audit trail, as a file somebody can check.
@@ -24,6 +25,9 @@ export async function GET(
 ): Promise<Response> {
   const { id } = await context.params;
   const { membership } = await requireReadyUser();
+
+  const limited = await limit('audit.export', membership.firm.id);
+  if (!limited.ok) return tooManyRequests(limited, 'audit.export');
 
   const found = await getRequest(membership.firm.id, id);
   if (!found) return new Response('Not found', { status: 404 });
