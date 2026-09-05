@@ -85,3 +85,29 @@ export {
   type BuiltinTemplate,
   type SourceKey,
 } from './templates/index.js';
+
+export {
+  cadenceSchema,
+  defaultCadence,
+  describeCadence,
+  inQuietHours,
+  nextRunAt,
+  parseCadence,
+  quietHoursSchema,
+  timeOfDaySchema,
+  type Cadence,
+  type QuietHours,
+  type ScheduleState,
+  type TimeOfDay,
+} from './cadence.js';
+
+export {
+  addZonedDays,
+  atZonedTime,
+  isValidTimezone,
+  offsetMs,
+  zonedParts,
+  zonedTimeToUtc,
+  InvalidTimezone,
+  type ZonedParts,
+} from './timezone.js';

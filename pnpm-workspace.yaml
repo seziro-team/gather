@@ -14,6 +14,11 @@ onlyBuiltDependencies:
 # advisory that its parent has not yet picked up; `pnpm audit --prod --audit-level
 # high` in CI is what will tell us when one can be dropped.
 overrides:
+  # One `pg` for the whole workspace. Without this, pg-boss resolves its own copy and
+  # drizzle-orm is instantiated twice against two different drivers — which typechecks as
+  # two incompatible sets of column types and fails the build with a wall of
+  # "separate declarations of a private property". Not a security pin; a correctness one.
+  pg: '>=8.23.0'
   # GHSA path-traversal / arbitrary .map disclosure via sourceMappingURL — pulled in by next.
   postcss: '>=8.5.18'
   # libvips CVE-2026-33327/33328/35590/35591 — pulled in by next/image.

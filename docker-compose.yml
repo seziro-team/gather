@@ -28,6 +28,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Explicit: without a target, Docker builds the *last* stage in the file, which is
+      # the worker. Adding a second runtime image is exactly how that trap gets set.
+      target: runner
     image: gather/web:local
     restart: unless-stopped
     depends_on:
@@ -63,6 +66,20 @@ services:
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       GATHER_PORTAL_LINK_DAYS: ${GATHER_PORTAL_LINK_DAYS:-30}
       GATHER_PORTAL_SESSION_HOURS: ${GATHER_PORTAL_SESSION_HOURS:-72}
+      # Email. The worker sends scheduled reminders; the web app sends the manual
+      # "send one now", through the same code and the same send-once guard.
+      MAIL_DRIVER: ${MAIL_DRIVER:-none}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
+      MAIL_DKIM_SELECTOR: ${MAIL_DKIM_SELECTOR:-resend}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_REQUIRE_VALID_CERT: ${SMTP_REQUIRE_VALID_CERT:-true}
     volumes:
       # Holds the generated signing secret, the file-encryption key, and the local storage
       # driver's uploads. Backing this up is backing up Gather's state, alongside the
@@ -77,6 +94,49 @@ services:
       timeout: 5s
       retries: 24
       start_period: 10s
+
+  # The reminder engine. Its own container so a slow mail server cannot make the
+  # dashboard slow, and so restarting the sender does not sign anyone out.
+  #
+  # Safe to scale to more than one: schedules are claimed with FOR UPDATE SKIP
+  # LOCKED and every send is guarded by a unique index, so two workers divide the
+  # work rather than duplicating it.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    image: gather/worker:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      # Migrations run at web boot; the worker queries tables they create.
+      web:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-gather}:${POSTGRES_PASSWORD:-gather}@db:5432/${POSTGRES_DB:-gather}
+      GATHER_APP_URL: ${GATHER_APP_URL:-http://localhost:3000}
+      # Not used to sign anything here, but the shared env schema requires it.
+      GATHER_AUTH_SECRET: ${GATHER_AUTH_SECRET:-}
+      GATHER_LOG_LEVEL: ${GATHER_LOG_LEVEL:-info}
+      GATHER_DATA_DIR: /app/data
+      MAIL_DRIVER: ${MAIL_DRIVER:-none}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
+      MAIL_DKIM_SELECTOR: ${MAIL_DKIM_SELECTOR:-resend}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_REQUIRE_VALID_CERT: ${SMTP_REQUIRE_VALID_CERT:-true}
+      GATHER_REMINDER_SCAN_MINUTES: ${GATHER_REMINDER_SCAN_MINUTES:-1}
+      GATHER_REMINDER_BATCH: ${GATHER_REMINDER_BATCH:-50}
+    volumes:
+      - gather-data:/app/data
 
 volumes:
   gather-db:

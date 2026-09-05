@@ -9,6 +9,7 @@ import {
   replaceRequestStructure,
   request,
   section,
+  stopSchedule,
 } from '@gather/db';
 import type { Actor } from './actor';
 import { getTemplate } from './templates';
@@ -175,6 +176,62 @@ export async function updateRequestDetails(
       targetType: 'request',
       targetId: row.id,
       metadata: { title: row.title, dueAt: row.dueAt?.toISOString() ?? null },
+      ip: actor.context.ip,
+      ua: actor.context.ua,
+    });
+
+    return row;
+  });
+}
+
+/**
+ * Mark a request complete — and stop the reminders in the same transaction.
+ *
+ * The two go together on purpose. A request that is finished but still has an active
+ * schedule is the single worst bug this product could ship: the client sent everything,
+ * and Gather keeps emailing to ask for it. Doing both in one transaction means there is no
+ * window, however small, in which one is true and the other is not.
+ *
+ * Phase 5 replaces the button that calls this with per-item approval driving the same
+ * transition. The transition itself does not change.
+ */
+export async function completeRequest(actor: Actor, id: string): Promise<RequestRow> {
+  return getDb().transaction(async (tx) => {
+    const rows = await tx
+      .select({ id: request.id, status: request.status })
+      .from(request)
+      .where(and(eq(request.id, id), eq(request.firmId, actor.firmId)))
+      .limit(1);
+    const found = rows[0];
+    if (!found) throw new Error('Request not found');
+    if (found.status === 'archived') throw new Error('This request is archived.');
+    if (found.status === 'complete') throw new Error('This request is already complete.');
+    if (found.status === 'draft') {
+      throw new Error('This request has not been sent yet, so there is nothing to complete.');
+    }
+
+    const updated = await tx
+      .update(request)
+      .set({ status: 'complete', completedAt: new Date(), updatedAt: new Date() })
+      .where(eq(request.id, id))
+      .returning();
+    const row = updated[0]!;
+
+    await stopSchedule(tx, id, 'the firm marked the request complete', {
+      firmId: actor.firmId,
+      actorId: actor.actorId,
+      actorType: 'user',
+    });
+
+    await appendAuditEvent(tx, {
+      action: 'request.completed',
+      actorType: 'user',
+      actorId: actor.actorId,
+      firmId: actor.firmId,
+      requestId: row.id,
+      targetType: 'request',
+      targetId: row.id,
+      metadata: { title: row.title },
       ip: actor.context.ip,
       ua: actor.context.ua,
     });

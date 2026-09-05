@@ -9,6 +9,7 @@ import { currentActor } from '@/lib/actor';
 import { downloadQuery, firmScope, signFileDownload } from '@/lib/files';
 import { issuePortalLink, revokePortalLink } from '@/lib/portal';
 import {
+  completeRequest,
   createRequest,
   deleteRequest,
   getRequest,
@@ -18,7 +19,16 @@ import {
 import { saveRequestAsTemplate } from '@/lib/templates';
 import type { FormState } from '@/lib/form-state';
 import type { SaveStructureResult } from './structure-result';
-import type { FirmDownloadResult, LinkActionResult, NewLinkResult } from './share-result';
+import { cadenceSchema, describeCadence } from '@gather/core';
+import { saveSchedule, sendReminderNow } from '@/lib/reminders';
+import type {
+  CompleteResult,
+  FirmDownloadResult,
+  LinkActionResult,
+  NewLinkResult,
+  ScheduleResult,
+  SendNowResult,
+} from './share-result';
 
 /** An empty date input posts an empty string; treat that as "no due date". */
 const optionalDate = z
@@ -245,4 +255,79 @@ export async function saveAsTemplateAction(
 
   revalidatePath('/templates');
   redirect('/templates');
+}
+
+/**
+ * Turn a cadence posted from the editor into a schedule.
+ *
+ * Parsed with the same zod schema the worker uses to read it back out of `jsonb`, so a
+ * cadence that saves is a cadence the engine can act on — there is no second, looser
+ * definition of what a valid schedule is.
+ */
+export async function saveScheduleAction(
+  requestId: string,
+  cadence: unknown,
+  active: boolean,
+): Promise<ScheduleResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const parsed = cadenceSchema.safeParse(cadence);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      ok: false,
+      error: issue
+        ? `${issue.path.join('.') || 'Schedule'} ${issue.message}`
+        : 'Check the schedule.',
+    };
+  }
+
+  const actor = await currentActor();
+  try {
+    const { nextRunAt } = await saveSchedule(actor, requestId, parsed.data, active);
+    revalidatePath(`/requests/${requestId}`);
+    return {
+      ok: true,
+      nextRunAt: nextRunAt?.toISOString() ?? null,
+      description: describeCadence(parsed.data),
+    };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+export async function sendReminderNowAction(requestId: string): Promise<SendNowResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  const result = await sendReminderNow(actor, requestId);
+  revalidatePath(`/requests/${requestId}`);
+  return result;
+}
+
+/**
+ * Mark a request complete, which is also what stops the reminders.
+ *
+ * Phase 5 replaces this with per-item approval driving the same transition; until then it
+ * is a deliberate button rather than an inference, because "complete" is the firm's
+ * judgement and nothing else should be making it.
+ */
+export async function completeRequestAction(requestId: string): Promise<CompleteResult> {
+  if (!z.uuid().safeParse(requestId).success) {
+    return { ok: false, error: 'That request could not be identified.' };
+  }
+
+  const actor = await currentActor();
+  try {
+    await completeRequest(actor, requestId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  return { ok: true };
 }

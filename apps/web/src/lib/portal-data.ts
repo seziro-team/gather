@@ -20,6 +20,7 @@ import {
   refreshFileResponseStatus,
   request,
   setResponseValue,
+  stopSchedule,
   toTemplateItem,
   type FileRow,
   type ItemState,
@@ -324,6 +325,15 @@ export async function submitPortal(portal: PortalContext): Promise<void> {
       .update(request)
       .set({ status: 'submitted', updatedAt: new Date() })
       .where(eq(request.id, portal.request.id));
+
+    // Stop chasing, in the same transaction as the status change. A client who has just
+    // told the firm they are done and then gets another "you still owe us these documents"
+    // email is the failure this whole feature exists to avoid — and the worker's scan
+    // already excludes `submitted`, so this is belt and braces on the schedule row itself.
+    await stopSchedule(tx, portal.request.id, 'the client sent everything back', {
+      firmId: portal.request.firmId,
+      actorType: 'client',
+    });
 
     await appendAuditEvent(tx, {
       action: 'portal.submitted',

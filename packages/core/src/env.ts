@@ -81,6 +81,45 @@ const envSchema = z
     GATHER_PORTAL_LINK_DAYS: z.coerce.number().int().positive().max(365).default(30),
     /** How long the session a link creates lasts, so a shared device forgets eventually. */
     GATHER_PORTAL_SESSION_HOURS: z.coerce.number().int().positive().max(720).default(72),
+
+    // ── Email ────────────────────────────────────────────────────────────────
+    /**
+     * `none` is the honest default. Gather ships with no mail credentials, so out of the
+     * box it says "no email is configured" in the UI rather than queueing reminders that
+     * will never leave — which is the failure mode this default exists to prevent.
+     */
+    MAIL_DRIVER: z.enum(['none', 'resend', 'smtp']).default('none'),
+    MAIL_FROM: optionalText,
+    MAIL_REPLY_TO: optionalText,
+    /**
+     * The DKIM selector `pnpm check:email` looks for. Resend publishes under `resend`;
+     * your own mail server chose its own when you set it up.
+     */
+    MAIL_DKIM_SELECTOR: z.string().trim().min(1).default('resend'),
+
+    RESEND_API_KEY: optionalText,
+    /** From the Resend dashboard's webhook page; starts `whsec_`. */
+    RESEND_WEBHOOK_SECRET: optionalText,
+
+    SMTP_HOST: optionalText,
+    SMTP_PORT: z.coerce.number().int().positive().max(65535).default(587),
+    /** True for implicit TLS on 465. Port 587 upgrades with STARTTLS and wants this false. */
+    SMTP_SECURE: booleanish.default(false),
+    SMTP_USER: optionalText,
+    SMTP_PASSWORD: optionalText,
+    SMTP_REQUIRE_VALID_CERT: booleanish.default(true),
+
+    // ── Worker ───────────────────────────────────────────────────────────────
+    /**
+     * How often the worker looks for schedules that have come due, in minutes.
+     *
+     * Minutes rather than seconds because the scan is a pg-boss cron entry, and cron's
+     * resolution is a minute. A variable that promised seconds and silently rounded would
+     * be worse than one that says what it does.
+     */
+    GATHER_REMINDER_SCAN_MINUTES: z.coerce.number().int().min(1).max(60).default(1),
+    /** Ceiling on reminders sent per scan, so a backlog cannot become a sending burst. */
+    GATHER_REMINDER_BATCH: z.coerce.number().int().min(1).max(500).default(50),
   })
   .superRefine((value, ctx) => {
     if (value.STORAGE_DRIVER !== 's3') return;
@@ -107,6 +146,37 @@ const envSchema = z
           'must be set explicitly when STORAGE_DRIVER=s3 — Gather will not generate a key it ' +
           'cannot store next to the files. Generate one with `openssl rand -base64 32` and keep ' +
           'a backup: without it the objects in your bucket cannot be read.',
+      });
+    }
+  })
+  .superRefine((value, ctx) => {
+    if (value.MAIL_DRIVER === 'none') return;
+
+    // A driver with no From address would fail on the first send, at 9am, silently, in a
+    // background worker. Failing at boot instead is the whole point of validating config.
+    if (!value.MAIL_FROM) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MAIL_FROM'],
+        message:
+          'is required when MAIL_DRIVER is set. Use an address on a domain you control, ' +
+          'e.g. "Delgado Bookkeeping <documents@delgado.example>".',
+      });
+    }
+
+    if (value.MAIL_DRIVER === 'resend' && !value.RESEND_API_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['RESEND_API_KEY'],
+        message: 'is required when MAIL_DRIVER=resend. Create one at https://resend.com/api-keys.',
+      });
+    }
+
+    if (value.MAIL_DRIVER === 'smtp' && !value.SMTP_HOST) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SMTP_HOST'],
+        message: 'is required when MAIL_DRIVER=smtp.',
       });
     }
   });

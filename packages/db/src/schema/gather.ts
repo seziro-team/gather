@@ -311,7 +311,24 @@ export const reminderLog = pgTable(
     providerMessageId: text(),
     status: text().notNull(),
     error: text(),
+    /**
+     * What makes a reminder send exactly once.
+     *
+     * Derived, not random: `<schedule id>:<sent count>` for a scheduled reminder. The row
+     * is inserted *before* the message is handed to a driver, so a worker that is killed
+     * mid-send and restarted computes the same key, collides with this unique index, and
+     * declines to send a second copy.
+     *
+     * Resend's `Idempotency-Key` header carries the same value, which collapses a
+     * duplicate at their end too — but SMTP has no equivalent, and a guarantee that only
+     * holds for one of two drivers is not a guarantee. This index is the real one.
+     */
+    idempotencyKey: text().notNull(),
     sentAt: timestamp(ts).notNull().defaultNow(),
   },
-  (table) => [index().on(table.requestId), index().on(table.providerMessageId)],
+  (table) => [
+    index().on(table.requestId),
+    index().on(table.providerMessageId),
+    uniqueIndex().on(table.idempotencyKey),
+  ],
 );

@@ -1,0 +1,63 @@
+# A real SMTP server for development and for the end-to-end tests.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mail.yml up -d
+#   open http://localhost:8025
+#
+# Mailpit (MIT, https://github.com/axllent/mailpit) speaks real SMTP and shows what
+# arrived in a web inbox. It is not a mock: Gather connects to it over TCP, negotiates,
+# authenticates and sends a real RFC 5322 message, and the reminder engine cannot tell it
+# from a production mail server. What it does not do is *relay* — nothing leaves the
+# machine, which is exactly what you want while you are testing reminders against your own
+# email address.
+#
+# ⚠️ Never run this in production. A firm's clients would get nothing, and the reminder log
+#    would show every message as sent.
+#
+# For a real install, set MAIL_DRIVER=resend or point SMTP_HOST at your own server, and run
+# `pnpm check:email you@yourfirm.example` to prove it works before a client depends on it.
+
+services:
+  mailpit:
+    image: axllent/mailpit:v1.31
+    restart: unless-stopped
+    environment:
+      # Keep everything in memory: this is a scratch inbox, and a volume for it would be
+      # one more thing to remember to clear.
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 'true'
+      MP_SMTP_AUTH_ALLOW_INSECURE: 'true'
+    ports:
+      # The inbox UI. SMTP itself is not published — only the compose network needs it.
+      - '${MAILPIT_UI_PORT:-8025}:8025'
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  web:
+    environment:
+      MAIL_DRIVER: smtp
+      MAIL_FROM: ${MAIL_FROM:-Gather <documents@gather.test>}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_REQUIRE_VALID_CERT: 'false'
+
+  worker:
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    environment:
+      MAIL_DRIVER: smtp
+      MAIL_FROM: ${MAIL_FROM:-Gather <documents@gather.test>}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_REQUIRE_VALID_CERT: 'false'
+      GATHER_REMINDER_SCAN_MINUTES: ${GATHER_REMINDER_SCAN_MINUTES:-1}

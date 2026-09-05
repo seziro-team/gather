@@ -3,13 +3,16 @@ import { notFound } from 'next/navigation';
 import { and, desc, eq } from 'drizzle-orm';
 import { auditEvent, getDb } from '@gather/db';
 import { RequestChecklist } from '@/components/request-checklist';
+import { formatDueDate } from '@/lib/format';
 import { Alert, Badge, Button, Card, linkButton, PageHeader } from '@/components/ui';
 import { listPortalLinks } from '@/lib/portal';
 import { readPortalView } from '@/lib/portal-data';
+import { readRemindersView } from '@/lib/reminders';
 import { getRequest } from '@/lib/requests';
 import { requireReadyUser } from '@/lib/session';
 import { deleteRequestAction } from '../actions';
 import { RequestDetailsForm, SaveAsTemplateForm } from './request-forms';
+import { ReminderSchedule } from './reminder-forms';
 import { PortalLinks } from './share-forms';
 
 export const dynamic = 'force-dynamic';
@@ -46,9 +49,10 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   if (!found) notFound();
 
   const db = getDb();
-  const [view, links, events] = await Promise.all([
+  const [view, links, reminders, events] = await Promise.all([
     readPortalView(id),
     listPortalLinks(id),
+    readRemindersView(id),
     db
       .select()
       .from(auditEvent)
@@ -60,10 +64,6 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   const formatter = new Intl.DateTimeFormat('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: membership.firm.timezone,
-  });
-  const dateOnly = new Intl.DateTimeFormat('en-GB', {
-    dateStyle: 'medium',
     timeZone: membership.firm.timezone,
   });
 
@@ -98,7 +98,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
           {view.answered} of {view.total} received
         </Badge>
         {found.request.dueAt ? (
-          <Badge tone="amber">Due {dateOnly.format(found.request.dueAt)}</Badge>
+          <Badge tone="amber">Due {formatDueDate(found.request.dueAt)}</Badge>
         ) : null}
         {found.request.templateKey ? (
           <Badge tone="brand">From {found.request.templateKey}</Badge>
@@ -109,8 +109,8 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
         <h2 className="text-lg font-semibold text-slate-900">Share with your client</h2>
         <p className="mt-1 mb-4 text-sm text-slate-600">
           A portal link needs no account and no password. Send it however you already talk to this
-          client — automatic email and reminders arrive in the next release. Each link can be
-          revoked on its own, and every time one is opened it is recorded below.
+          client, or set up reminders below and let Gather email it. Each link can be revoked on its
+          own, and every time one is opened it is recorded below.
         </p>
         <PortalLinks
           requestId={id}
@@ -124,6 +124,26 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
           }))}
         />
       </Card>
+
+      {found.request.status === 'draft' ? null : (
+        <Card>
+          <h2 className="text-lg font-semibold text-slate-900">Reminders</h2>
+          <p className="mt-1 mb-4 text-sm text-slate-600">
+            Gather emails this client until everything required is in, then stops on its own. The
+            time is read on their clock, not yours.
+          </p>
+          <ReminderSchedule
+            requestId={id}
+            schedule={reminders.schedule}
+            mailConfigured={reminders.mailConfigured}
+            firmTimezone={membership.firm.timezone}
+            outstanding={reminders.outstanding}
+            requiredMissing={reminders.requiredMissing}
+            canComplete={found.request.status !== 'complete'}
+            log={reminders.log}
+          />
+        </Card>
+      )}
 
       {found.request.status !== 'draft' ? null : (
         <Alert tone="info" title="Nothing has been sent yet">

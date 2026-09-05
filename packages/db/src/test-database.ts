@@ -64,6 +64,7 @@ async function ensureDatabase(server: URL, name: string): Promise<void> {
     throw new Error(
       `Could not reach Postgres at ${admin.host} to create the scratch database "${name}": ` +
         `${(error as Error).message}. ${HINT}`,
+      { cause: error },
     );
   }
 

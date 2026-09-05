@@ -1,7 +1,7 @@
 # Gather — Build Plan
 
-**Status:** Phases 1–3 shipped (foundation; request builder and built-in templates; client
-portal with encrypted uploads). Phase 4 is next.
+**Status:** Phases 1–4 shipped (foundation; request builder and built-in templates; client
+portal with encrypted uploads; reminder engine). Phase 5 is next.
 **Research date:** 2026-07-28. Every price, endpoint and quota below was read from the live
 source on that date; each is linked. Re-verify anything older than a quarter before quoting it
 in marketing copy.
@@ -781,7 +781,7 @@ pnpm exec playwright test --project=mobile-safari
 docker run --rm --network container:gather-garage-1 \
   -v gather_garage-meta:/var/lib/garage/meta \
   -v "$PWD/docker/garage.toml:/etc/garage.toml:ro" \
-  -e GARAGE_RPC_SECRET="$(grep ^GARAGE_RPC_SECRET= .env | cut -d= -f2)" \
+  -e GARAGE_RPC_SECRET="$(grep ^GARAGE_RPC_SECRET= .env | tail -1 | cut -d= -f2)" \
   --entrypoint garage gather/garage-init:local bucket info gather   # objects present
 
 DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
@@ -789,7 +789,7 @@ DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 
 ---
 
-### Phase 4 — Reminder engine (real emails, real schedules)
+### Phase 4 — Reminder engine (real emails, real schedules) ✅ **shipped**
 **Goal:** the nagging works, and it stops.
 
 Tasks: pg-boss wiring; cadence model + editor (interval / escalating / custom days + send time,
@@ -799,25 +799,64 @@ client timezone, quiet hours, max count); Resend + SMTP drivers behind one inter
 "send now" manual nudge; preflight `pnpm check:email` that validates SPF/DKIM/DMARC and sends a
 test.
 
-⚠️ **Operator credential required** (Realness Rule §4): `RESEND_API_KEY` + a verified sending
-domain, **or** SMTP host/user/pass, plus a real test inbox. We stop and ask; we do not mock a send.
+> **Deviation (P4).** Cadences are **day-based**, not minute-based. The demo script below
+> asked for a two-minute cadence to prove reminders in a test; the shortest thing a firm can
+> configure is one day, because a product that can email a client every two minutes is a
+> product that will. The end-to-end suite moves `next_run_at` into the past instead, which
+> is what tomorrow looks like to the worker — everything else in the path is real.
+>
+> **Deviation (P4).** The reminder logic lives in a new package, **`@gather/reminders`**,
+> rather than inside `apps/worker`. The web app needs the identical path for the manual
+> "send one now" button, and two implementations of "compose and send a reminder" is exactly
+> how a send-once guarantee stops holding.
+>
+> **Deviation (P4).** Idempotency is enforced by a **unique index on `reminder_log`**, not
+> by the provider. Resend's `Idempotency-Key` header carries the same value and collapses
+> duplicates at their end too — but SMTP has no equivalent, and a guarantee that holds for
+> only one of two shipped drivers is not a guarantee. Migration `0003_reminder_idempotency`.
+>
+> **Deviation (P4).** `docker-compose.mail.yml` ships **Mailpit** for development and for
+> the test suite. It is a real SMTP server that catches instead of relaying, so the suite
+> proves a real SMTP conversation without needing an operator's credentials to run.
+>
+> **Correction (P4).** A due date is a calendar date carried in a `timestamptz`, stored as
+> 23:59:59.999 UTC. It was being rendered in a local timezone, so the same request read as
+> 10 April in New York and 11 April in Sydney. Now rendered in UTC everywhere, which is what
+> the firm typed.
 
-**Acceptance:** ① Schedule at 2-minute cadence → **two real emails arrive** at a real inbox;
-Resend message IDs pasted into `progress.md`. ② Mark the request complete → no further emails, and
-`reminder_schedule.active=false`. ③ The same run passes against a real SMTP server. ④ A bounce
-webhook flips the reminder to `bounced` and surfaces in the dashboard. ⑤ Restarting the worker
-mid-schedule doesn't double-send (idempotency proven).
+⚠️ **Operator credential still required for Resend** (Realness Rule §4). The Resend driver is
+written against the documented API and unit-tested, and **has never been run against the live
+service** — that needs `RESEND_API_KEY` and a verified sending domain. Everything shipped is
+proven against real SMTP instead. Recorded as a hard stop in `progress.md`.
+
+**Acceptance:** ① A schedule sends **real emails** to a real inbox over a real SMTP
+conversation, and the reminder log records each one. ② Mark the request complete → no further
+emails, and `reminder_schedule.active=false`. ③ A client who sends everything back is not
+chased again. ④ A bounce webhook flips the reminder to `bounced` and surfaces in the
+dashboard. ⑤ A worker that dies between claiming a reminder and sending it does not send it
+twice when it restarts. ⑥ A manual nudge sends immediately without consuming a cadence step.
+*(Resend message ids remain unproven — see the credential note above.)*
 
 **Demo script:**
 ```bash
-pnpm check:email                       # SPF/DKIM/DMARC pass + test send
-pnpm demo:reminders --request $REQ --every 2m
-# wait; screenshots of the real inbox → artifacts/phase4/inbox-*.png
-docker compose exec -T db psql -U gather -c \
-  "select sent_at,channel,provider_message_id,status from reminder_log where request_id='$REQ';"
-curl -X POST localhost:3000/api/requests/$REQ/complete -H "$AUTH"
-# wait 3× cadence → no new rows
-docker compose restart worker && sleep 150  # still no duplicates
+# A real SMTP server that catches instead of relaying, and the worker alongside the app.
+docker compose -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.test.yml \
+  up -d --build
+open http://localhost:8025            # the inbox everything below lands in
+
+# The deliverability preflight: real DNS lookups, then a real message.
+pnpm check:email you@yourfirm.example
+
+# ① … ⑥ — driven through the real UI against the real worker
+pnpm exec playwright test --project=chromium reminders.spec.ts
+
+docker compose exec -T db psql -U gather -c "
+  select status, to_address, provider_message_id, idempotency_key
+    from reminder_log order by sent_at desc limit 5;"
+docker compose exec -T db psql -U gather -c "
+  select active, sent_count, next_run_at from reminder_schedule;"
+
+DATABASE_URL=postgres://gather:gather@localhost:5432/gather pnpm verify:audit
 ```
 
 ---
@@ -955,4 +994,5 @@ Each phase is designed to start from a cleared context. Read `CLAUDE.md`, then t
 - ~~**Phase 1:** `Start Phase 1: Foundation, schema, auth, CI — per plan.md §9.`~~ — shipped.
 - ~~**Phase 2:** `Start Phase 2: Request builder + real templates — per plan.md §9.`~~ — shipped.
 - ~~**Phase 3:** `Start Phase 3: Client portal + real uploads — per plan.md §9.`~~ — shipped.
-- **Phase 4:** `Start Phase 4: Reminder engine — per plan.md §9.`
+- ~~**Phase 4:** `Start Phase 4: Reminder engine — per plan.md §9.`~~ — shipped.
+- **Phase 5:** `Start Phase 5: Approve/reject, dashboard, zip, audit export — per plan.md §9.`

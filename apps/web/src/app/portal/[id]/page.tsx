@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { PortalScreen } from '@/components/portal/screen';
+import { formatDueDate } from '@/lib/format';
 import { currentPortal } from '@/lib/portal';
 import { readPortalView } from '@/lib/portal-data';
 
@@ -62,12 +63,9 @@ export default async function PortalPage({ params }: { params: Promise<{ id: str
   const logoUrl = snapshot?.logoUrl ?? portal.firm.logoUrl;
   const color = snapshot?.brandColor ?? portal.firm.brandColor;
 
-  const due = portal.request.dueAt
-    ? new Intl.DateTimeFormat('en-GB', {
-        dateStyle: 'long',
-        timeZone: portal.firm.timezone,
-      }).format(portal.request.dueAt)
-    : null;
+  // Rendered in UTC, not the firm's timezone — see formatDueDate for why a due *date*
+  // and a due *time* are not the same thing.
+  const due = portal.request.dueAt ? formatDueDate(portal.request.dueAt) : null;
 
   return (
     <div style={brandStyle(color)} className="min-h-dvh">

@@ -632,3 +632,211 @@ Entry template:
      (TypeScript 5.9 → 6.0.3) still must not be merged.
 
 - **Next step (exact resume instruction):** `Start Phase 4: Reminder engine — per plan.md §9.`
+
+---
+
+## 2026-09-05 — Phase 4: Reminder engine
+
+- **Shipped:**
+  - **`@gather/core` cadence model** — three shapes (`interval`, `escalating`,
+    `weekdays`), a send time and a timezone read on the *client's* clock, quiet hours
+    that may wrap midnight, and a stop-after count. `nextRunAt` is a pure function of
+    the schedule and the clock, so when a client gets nagged is testable without a
+    database, a queue or an SMTP server. Timezone arithmetic is `Intl` directly — about
+    forty lines, and no second copy of the IANA database to keep current.
+  - **`@gather/mail`** — one interface, two real drivers. Resend over `fetch` (no SDK, so
+    the dependency surface of the package holding a firm's sending credentials is zero),
+    and SMTP over nodemailer with a connection pool. Branded HTML + text emails written as
+    a client reads them. Svix webhook verification implemented from the documented scheme.
+  - **`@gather/reminders`** — compose-and-send, shared by the worker and the web app so a
+    scheduled reminder and a manual nudge take the identical path through the identical
+    send-once guard.
+  - **`apps/worker`** — a second container running pg-boss 12.30.0 on **Postgres alone**,
+    with a one-minute cron, a `singleton` queue policy and graceful shutdown.
+  - **Send-once, enforced in Postgres.** `FOR UPDATE SKIP LOCKED` stops two workers racing;
+    a unique index on `reminder_log.idempotency_key` stops a *restarted* worker racing
+    itself. The claim row is written **before** the message reaches a driver, so a process
+    killed in that window loses one reminder rather than sending two.
+  - **Stop-on-complete**, in the same transaction as the status change — the firm marking a
+    request complete, and the client sending it back, both switch the schedule off. Also
+    stops on its own when nothing required is outstanding.
+  - **`pnpm check:email`** — real SPF, DKIM, DMARC and MX lookups with a specific fix for
+    each failure, then a real test message.
+  - **Resend webhook ingest** at `/api/webhooks/resend` — signature-verified, ordering-safe
+    (a late `delivered` can never overwrite a `bounced`), and audited for outcomes a firm
+    would want in the history.
+  - **`docker-compose.mail.yml`** — Mailpit for development and for the test suite.
+
+- **Real-world proof (what actually ran):** the full stack (`db`, `web`, `worker`,
+  `mailpit`), then everything.
+
+  ```
+  18 passed (12.6m)      ← every e2e test, chromium + mobile-safari
+  Test Files 13 passed | Tests 172 passed        ← unit + integration, real Postgres
+  typecheck clean · lint clean · format clean
+  ```
+
+  **The email preflight, against real DNS.** Two runs, one that should fail and one that
+  should pass, to show the check is reading the world rather than agreeing with itself:
+
+  ```
+  $ pnpm check:email                      # MAIL_FROM on a domain with no records
+    ✗ SPF    No v=spf1 TXT record on gather.test.
+             Add a TXT record on gather.test listing whoever sends your mail. For Resend
+             that is "v=spf1 include:amazonses.com ~all"; …
+    ✗ DKIM   No DKIM key found at resend._domainkey.gather.test or default._domainkey…
+    ✗ DMARC  No v=DMARC1 TXT record on _dmarc.gather.test.
+    ! MX     No MX record on gather.test.
+    ✗ DNS is not ready — reminders are likely to land in spam.          exit=1
+
+  $ MAIL_FROM='Gather <noreply@github.com>' MAIL_DKIM_SELECTOR=s1 pnpm check:email
+    ✓ SPF    "v=spf1 ip4:192.30.252.0/22 include:spf.protection.outlook.com …~all"
+    ✓ DKIM   Signing key published for selector "s1" on github.com.
+    ✓ DMARC  "v=DMARC1; p=quarantine; sp=reject; pct=100; rua=mailto:dmarc@github.com; …"
+    ✓ MX     1 mail exchanger, lowest priority github-com.mail.protection.outlook.com.
+    ✓ DNS looks right.
+  ```
+
+  **A real message, over a real SMTP conversation:**
+
+  ```
+  $ pnpm check:email alex@delgado.test
+    ✓ Sent to alex@delgado.test via smtp.
+        id <check-email:alex@delgado.test:2026-09-05T08:53@gather.test>
+
+  $ curl -sS 'http://127.0.0.1:8025/api/v1/messages?limit=1'
+   documents@gather.test -> ['alex@delgado.test'] | Gather test message from Gather
+  ```
+
+  **① … ⑥ — the acceptance criteria, driven through the real UI against the real worker:**
+
+  ```
+  ✓ ① a schedule sends real reminders, and the log records what happened      (1.1m)
+  ✓ ② marking a request complete stops the reminders                          (1.4m)
+  ✓ ③ a client who sends everything back is not chased again                  (50.5s)
+  ✓ ④ a worker that dies mid-send does not send the reminder twice on restart (1.7m)
+  ✓ ⑤ a manual nudge sends immediately without consuming a cadence step       (6.5s)
+  ✓ ⑥ a bounce webhook flips the reminder and shows the firm what happened    (26.3s)
+  ```
+
+  The worker's own log for one of those sends, showing the derived idempotency key and the
+  next run computed from the cadence:
+
+  ```
+  {"level":"info","name":"gather-worker","requestId":"809deb9c-…","scheduleId":"424abcd9-…",
+   "msg":"reminder sent","to":"r***@gather.test","driver":"smtp",
+   "providerMessageId":"<schedule:424abcd9-…:1@delgado.test>","outstanding":2,
+   "nextRunAt":"2026-09-08T09:00:00.000Z"}
+  ```
+
+  Note `"to":"r***@gather.test"` — addresses are redacted in logs.
+
+  **The state that proves each criterion:**
+
+  ```
+   status  | to_address                    | message_id            | idempotency_key
+  ---------+-------------------------------+-----------------------+---------------------------------
+   bounced | rosa-…-7559@gather.test       | <schedule:8ac1d1f2-…  | schedule:8ac1d1f2-…:0
+   sent    | rosa-…-9634@gather.test       | <manual:2f291e4b-…    | manual:2f291e4b-…:2026-09-05T09:42
+   queued  | rosa-…-6282@gather.test       |                       | schedule:395a220b-…:0
+   sent    | rosa-…-7416@gather.test       | <schedule:fb178a11-…  | schedule:fb178a11-…:0
+
+   active | sent_count |        next_run_at
+  --------+------------+----------------------------
+   t      |          1 | 2026-09-08 09:00:00+00      ← cadence advanced three days
+   f      |          1 |                             ← stopped; nothing more will be sent
+  ```
+
+  The `queued` row with no message id is the crash simulation from ④: a claim that was
+  written and never sent. The worker restarted, recomputed
+  `schedule:395a220b-…:0`, found it taken and refused — `expect(logs).toContain('already
+  claimed')` and the log count stayed at one.
+
+  **Everything reminders do is in the hash-chained audit trail:**
+
+  ```
+           action         | count
+  ------------------------+-------
+   reminder.bounced       |     2
+   reminder.schedule_set  |    26
+   reminder.sent_manually |     5
+   reminder.stopped       |     7
+   request.completed      |     3
+  ```
+
+- **Decisions & why:**
+  - **Idempotency belongs in Postgres, not in the provider.** Resend has an
+    `Idempotency-Key` header and Gather sends it; SMTP has nothing of the sort. A
+    guarantee that holds for one of two shipped drivers is not a guarantee, so the real
+    one is a unique index and the header is a courtesy on top. The key is *derived* —
+    `schedule:<id>:<sent_count>` — so a restarted process recomputes it rather than
+    minting a new one.
+  - **The claim is written before the send, not after.** A crash between them loses one
+    reminder; a crash the other way sends two. Losing one is visible in the log and
+    recoverable. Sending two is neither.
+  - **A retryable failure does not advance `sent_count`.** Nothing was sent, so the retry
+    has to reuse the same key and stay the same reminder rather than becoming the next one
+    in the sequence. A permanent failure stops the schedule instead — a mailbox that does
+    not exist will not start existing, and retrying it every minute for a month is noise
+    that hides the failures worth reading.
+  - **Cadences are day-based on purpose.** A product that can email a client every two
+    minutes is a product that will. Recorded as a deviation from the demo script.
+  - **The reminder logic is a package, not part of the worker.** The manual "send one now"
+    button needs the identical path, and two implementations of "compose and send a
+    reminder" is exactly how a send-once guarantee stops holding.
+  - **The timezone is the client's, not the firm's.** A London firm chasing a client in
+    Sydney sends at nine in Sydney, which is the small hours in London — and that is
+    correct. Tested in both directions across both daylight-saving transitions.
+  - **Quiet hours move a send rather than skipping it.** A reminder that would land at
+    3 a.m. goes out at eight instead. Skipping it would mean a cadence quietly sending
+    fewer reminders than the firm configured.
+  - **No open or click tracking.** Both need a pixel and a link rewriter, and neither
+    belongs in an email asking somebody for their tax documents. Only delivery outcomes
+    are subscribed to.
+  - **Mailpit is shipped as a documented dev overlay** rather than kept in a test harness.
+    It is a real SMTP server; it is the difference between "the suite proves email works"
+    and "the suite proves our mock agrees with us". It is labelled never-for-production.
+
+- **Deviations from plan:** five, all written into `plan.md` §9 — day-based cadences
+  instead of the demo script's two-minute one; a `@gather/reminders` package rather than
+  the logic living in `apps/worker`; idempotency in Postgres rather than at the provider;
+  the Mailpit dev overlay; and the due-date rendering correction.
+
+  Also worth recording: **the send-once test was wrong before it was right.** The first
+  version restarted the worker after a *successful* send and expected nothing further —
+  but `sent_count` had advanced, so the next reminder was legitimately due and the worker
+  correctly sent it. The test was asserting the wrong property. It now simulates the crash
+  the guarantee is actually about: a claim row written, no email sent, `sent_count`
+  unmoved.
+
+  And two build traps worth knowing about: adding a second runtime stage to the Dockerfile
+  made `docker compose build web` silently build the **worker**, because Docker's default
+  target is the last stage in the file — the web service now names `target: runner`
+  explicitly. And pulling in pg-boss resolved a second copy of `pg`, which instantiated
+  drizzle-orm twice and failed the typecheck with a wall of "separate declarations of a
+  private property"; `pg` is now pinned once for the workspace.
+
+- **Known issues:**
+  1. **⚠️ The Resend driver has never been run against the live service.** plan.md §9's
+     Phase 4 acceptance ① asks for real Resend message ids; that needs `RESEND_API_KEY`
+     and a verified sending domain, which the operator does not have yet. The driver is
+     written against the API documentation read on 2026-09-05 and unit-tested against a
+     captured request, including the retryable/permanent split for 429/5xx versus
+     401/422 — but **it is unproven**. To verify: set `MAIL_DRIVER=resend`, `MAIL_FROM` on
+     a verified domain and `RESEND_API_KEY`, then run
+     `pnpm check:email you@yourfirm.example` and paste the returned id here.
+  2. **The webhook path is proven with SMTP-produced message ids.** The handler matches on
+     `provider_message_id` and neither knows nor cares which driver produced it, so the
+     signature verification, the status transition and the ordering guard are all genuinely
+     exercised — but no message in that test was actually sent by Resend.
+  3. **No SMS.** Phase 7, and it needs a Twilio account with a registered 10DLC brand.
+  4. **A schedule stopped by a permanent send failure is not automatically resumed** when
+     the firm fixes the address. They have to switch reminders back on, and nothing tells
+     them to beyond the reminder log showing why it stopped.
+  5. **Reminders are per-request.** A client with four open requests gets four emails.
+     Batching by client is the obvious next step and is not what Phase 4 promised.
+  6. Carried over: `auth.sign_up` still has a NULL `firm_id`; item drag cannot cross
+     sections; no pagination; uploads cannot resume; Dependabot #4 (TypeScript 5.9 → 6.0.3)
+     still must not be merged.
+
+- **Next step (exact resume instruction):** `Start Phase 5: Approve/reject, dashboard, zip, audit export — per plan.md §9.`

@@ -10,3 +10,10 @@ export type NewLinkResult =
 export type LinkActionResult = { ok: true } | { ok: false; error: string };
 
 export type FirmDownloadResult = { ok: true; url: string } | { ok: false; error: string };
+
+export type ScheduleResult =
+  { ok: true; nextRunAt: string | null; description: string } | { ok: false; error: string };
+
+export type SendNowResult = { ok: true } | { ok: false; error: string };
+
+export type CompleteResult = { ok: true } | { ok: false; error: string };

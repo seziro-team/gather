@@ -1,4 +1,11 @@
+import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
+
+// The suite tests *this* install, so it has to agree with it about configuration — which
+// address reminders come from, which port the app is on. Reading the same .env the
+// containers were started with is what keeps the two from drifting. `loadEnvFile` never
+// overwrites a variable that is already set, so CI and the shell still win.
+if (existsSync('.env')) process.loadEnvFile('.env');
 
 /**
  * End-to-end tests run against a running Gather, not a mock: `docker compose up -d`
