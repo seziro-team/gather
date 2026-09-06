@@ -28,23 +28,26 @@
     "check:email": "pnpm --filter @gather/mail check:email",
     "worker": "pnpm --filter @gather/worker start",
     "retention:purge": "pnpm --filter @gather/worker retention:purge",
+    "keys:rotate": "pnpm --filter @gather/worker keys:rotate",
+    "audit:anchor": "pnpm --filter @gather/worker audit:anchor",
     "test:security": "playwright test --project=chromium security.spec.ts",
     "test:antivirus": "GATHER_TEST_ANTIVIRUS=1 playwright test --project=antivirus",
-    "test:cloud": "scripts/cloud-e2e.sh"
+    "test:cloud": "scripts/cloud-e2e.sh",
+    "test:sso": "scripts/sso-e2e.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@next/eslint-plugin-next": "^16.2.12",
-    "@playwright/test": "^1.62.0",
+    "@next/eslint-plugin-next": "^16.3.4",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.1",
-    "eslint": "^10.8.0",
+    "eslint": "^10.10.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "globals": "^17.8.0",
+    "globals": "^17.12.0",
     "prettier": "^3.9.6",
-    "prettier-plugin-tailwindcss": "^0.7.0",
+    "prettier-plugin-tailwindcss": "^0.7.4",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.65.0",
-    "vitest": "^4.1.10"
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^4.1.11"
   }
 }
