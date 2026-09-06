@@ -4,6 +4,7 @@ import { genericOAuth, twoFactor } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { and, count, eq } from 'drizzle-orm';
+import { logger } from './logger';
 import {
   env,
   passwordSignInAllowed,
@@ -58,13 +59,16 @@ export const AUTH_AUDIT_ACTIONS = {
 /**
  * What to record for a path, including the ones Better Auth registers as templates.
  *
- * The OIDC callback is declared as `/oauth2/callback/:providerId`, so `ctx.path` is the
- * template rather than the resolved URL — matching the literal `/oauth2/callback/sso`
- * silently recorded nothing, and an SSO install with no record of who signed in has given
- * up the thing the audit trail is for.
+ * The OIDC callback is declared as `/callback/:id`, so `ctx.path` is the template rather
+ * than the resolved URL — matching a literal recorded nothing, and an SSO install with no
+ * record of who signed in has given up the thing the audit trail is for.
+ *
+ * The prefix is deliberately broad: `sso` is the only provider Gather registers, so every
+ * callback that arrives here is one. If social providers are ever added, this needs the
+ * provider id out of the resolved path instead.
  */
 function auditActionFor(path: string): string | null {
-  if (path.startsWith('/oauth2/callback')) return 'auth.sso.sign_in';
+  if (path.startsWith('/callback/')) return 'auth.sso.sign_in';
   return AUTH_AUDIT_ACTIONS[path as keyof typeof AUTH_AUDIT_ACTIONS] ?? null;
 }
 
@@ -332,7 +336,18 @@ async function currentUserId(headers: Headers | undefined): Promise<string | nul
  */
 async function attachToSoleFirm(userId: string, role: 'member' | 'admin'): Promise<void> {
   const db = getDb();
-  const firmId = await soleFirmId(db);
-  if (!firmId) return;
-  await db.transaction((tx) => joinFirm(tx, { firmId, userId, role, via: 'sso-auto-join' }));
+  try {
+    const firmId = await soleFirmId(db);
+    if (!firmId) return;
+    await db.transaction((tx) => joinFirm(tx, { firmId, userId, role, via: 'sso-auto-join' }));
+  } catch (error) {
+    // Swallowed on purpose, and the comment above says so — but it said so while the code
+    // let the exception escape into Better Auth's create hook, where it would have failed
+    // the sign-in of somebody the provider had already authenticated. They land on
+    // "create or join a firm" instead, which is recoverable; a failed sign-in is not.
+    logger.error('could not auto-join an SSO user to the sole firm', {
+      userId,
+      error: (error as Error).message,
+    });
+  }
 }

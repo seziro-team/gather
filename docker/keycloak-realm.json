@@ -24,8 +24,8 @@
       "serviceAccountsEnabled": false,
       "secret": "gather-dev-client-secret",
       "redirectUris": [
-        "http://localhost:3000/api/auth/oauth2/callback/sso",
-        "http://127.0.0.1:3000/api/auth/oauth2/callback/sso"
+        "http://localhost:3000/api/auth/callback/sso",
+        "http://127.0.0.1:3000/api/auth/callback/sso"
       ],
       "webOrigins": ["http://localhost:3000", "http://127.0.0.1:3000"],
       "attributes": {

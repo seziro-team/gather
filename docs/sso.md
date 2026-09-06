@@ -15,12 +15,12 @@ this project will not adopt.
 
 ### 1. Register Gather as a client in your provider
 
-|                  |                                                 |
-| ---------------- | ----------------------------------------------- |
-| Application type | Web / confidential (it holds a client secret)   |
-| Grant            | Authorization code, with PKCE                   |
-| Redirect URI     | `<GATHER_APP_URL>/api/auth/oauth2/callback/sso` |
-| Scopes           | `openid profile email`                          |
+|                  |                                               |
+| ---------------- | --------------------------------------------- |
+| Application type | Web / confidential (it holds a client secret) |
+| Grant            | Authorization code, with PKCE                 |
+| Redirect URI     | `<GATHER_APP_URL>/api/auth/callback/sso`      |
+| Scopes           | `openid profile email`                        |
 
 The `email` claim is required — Gather identifies people by email everywhere: invitations,
 audit rows, reminders. A provider that will not release it cannot be used, and Gather says

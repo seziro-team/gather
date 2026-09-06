@@ -16,12 +16,12 @@ Entra ID, Google Workspace, Authentik or Auth0. Nothing in `apps/web` mentions K
 
 ## What is in it
 
-|        |                                                                                                         |
-| ------ | ------------------------------------------------------------------------------------------------------- |
-| Realm  | `gather`                                                                                                |
-| Client | `gather`, confidential, authorization-code + PKCE (`S256`), redirect to `/api/auth/oauth2/callback/sso` |
-| User   | `dana` / `dana@delgado.example.com` — inside the allowed domain                                         |
-| User   | `sam` / `sam@outside.example.org` — outside it, for testing `SSO_ALLOWED_DOMAINS`                       |
+|        |                                                                                                  |
+| ------ | ------------------------------------------------------------------------------------------------ |
+| Realm  | `gather`                                                                                         |
+| Client | `gather`, confidential, authorization-code + PKCE (`S256`), redirect to `/api/auth/callback/sso` |
+| User   | `dana` / `dana@delgado.example.com` — inside the allowed domain                                  |
+| User   | `sam` / `sam@outside.example.org` — outside it, for testing `SSO_ALLOWED_DOMAINS`                |
 
 Both passwords are `correct horse battery staple`, the same throwaway the rest of the test
 suite uses.
@@ -29,5 +29,5 @@ suite uses.
 ## Setting up your own provider instead
 
 See [`../docs/sso.md`](../docs/sso.md). The short version: register Gather as a confidential
-OIDC client, allow `<GATHER_APP_URL>/api/auth/oauth2/callback/sso` as a redirect URI, and
+OIDC client, allow `<GATHER_APP_URL>/api/auth/callback/sso` as a redirect URI, and
 set `SSO_ISSUER_URL`, `SSO_CLIENT_ID` and `SSO_CLIENT_SECRET`.

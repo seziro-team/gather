@@ -30,10 +30,13 @@ export function SsoButton({
     setError(null);
     setPending(true);
     try {
-      const response = await fetch('/api/auth/sign-in/oauth2', {
+      // `sign-in/social`, not `sign-in/oauth2`. Better Auth 1.7 folded generic-OAuth
+      // providers into the social sign-in path and stopped registering a separate
+      // endpoint — so the old URL is a 404, and the button silently did nothing.
+      const response = await fetch('/api/auth/sign-in/social', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId: 'sso', callbackURL: next }),
+        body: JSON.stringify({ provider: 'sso', callbackURL: next }),
       });
 
       const payload = (await response.json().catch(() => null)) as {
