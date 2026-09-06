@@ -12,10 +12,12 @@ import {
   inviteMember,
   listMembers,
   listPendingInvites,
+  joinFirm,
   removeMember,
   revokeInvite,
   seatsInUse,
   setMemberRole,
+  soleFirmId,
 } from './team.js';
 import { testDatabaseUrl } from './test-database.js';
 
@@ -338,5 +340,47 @@ describe('the platform admin view', () => {
     expect(totals.firms).toBeGreaterThanOrEqual(2);
     expect(totals.paying).toBe(1);
     expect(totals.pastDue).toBe(0);
+  });
+});
+
+describe('automatic provisioning from single sign-on', () => {
+  it('names the firm only when there is exactly one', async () => {
+    // The rule the whole feature rests on. Nothing to join yet:
+    expect(await soleFirmId(db)).toBeNull();
+
+    const only = await makeFirm('The Only Firm');
+    expect(await soleFirmId(db)).toBe(only.firmId);
+
+    // A second firm makes the question unanswerable, so the answer is "do not guess" —
+    // guessing here would drop a new sign-in into somebody else's client list.
+    await makeFirm('Another Firm');
+    expect(await soleFirmId(db)).toBeNull();
+  });
+
+  it('joins a user once, and records how they got in', async () => {
+    const { firmId } = await makeFirm('Delgado & Co');
+    const joiner = await makeUser('SSO Joiner');
+
+    await db.transaction((tx) =>
+      joinFirm(tx, { firmId, userId: joiner, role: 'member', via: 'sso-auto-join' }),
+    );
+    // Twice, because a provider that retries a callback must not produce two memberships.
+    await db.transaction((tx) =>
+      joinFirm(tx, { firmId, userId: joiner, role: 'member', via: 'sso-auto-join' }),
+    );
+
+    const members = await listMembers(db, firmId);
+    expect(members.filter((member) => member.userId === joiner)).toHaveLength(1);
+
+    // "Who let this person in?" has to have an answer, and for SSO the answer is nobody —
+    // which is exactly why the metadata has to say so.
+    const [{ via }] = (
+      await db.execute<{ via: string }>(
+        sql`select metadata->>'via' as via from audit_event
+             where action = 'firm.member_added' and actor_type = 'system'
+             order by id desc limit 1`,
+      )
+    ).rows;
+    expect(via).toBe('sso-auto-join');
   });
 });

@@ -1,7 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { env } from '@gather/core';
-import { getAuth } from './auth';
+import { env, twoFactorRequired } from '@gather/core';
+import { getAuth, signedInThroughSso, ssoSettings } from './auth';
 import { getMembership, type Membership } from './firm';
 
 export interface SessionUser {
@@ -45,8 +45,23 @@ export async function requireMembership(): Promise<{ user: SessionUser; membersh
  */
 export async function requireReadyUser(): Promise<{ user: SessionUser; membership: Membership }> {
   const result = await requireMembership();
-  if (env().GATHER_REQUIRE_2FA && !result.user.twoFactorEnabled) {
+  if (result.user.twoFactorEnabled) return result;
+
+  // On an install that enforces SSO, the identity provider has already authenticated this
+  // person and is where the enterprise actually administers MFA. Asking for a second TOTP
+  // on top is not more security — it is a second secret kept in the same password manager.
+  // Every other case is unchanged: a password account still has to set one up.
+  const sso = ssoSettings();
+  const throughSso = sso.enforced ? await signedInThroughSso(result.user.id) : false;
+
+  if (
+    twoFactorRequired(sso, {
+      requireTwoFactor: env().GATHER_REQUIRE_2FA,
+      signedInThroughSso: throughSso,
+    })
+  ) {
     redirect('/account/security?required=1');
   }
+
   return result;
 }

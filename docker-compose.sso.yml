@@ -1,0 +1,70 @@
+# Single sign-on, with a real identity provider.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d --build
+#   pnpm test:sso
+#
+# Keycloak (Apache-2.0, https://www.keycloak.org) is a real OIDC provider: a real discovery
+# document, the real authorization code flow with PKCE, real ID tokens signed with a real
+# key. Gather does not know it is Keycloak — it reads the discovery document, which is
+# exactly what it does against Okta, Microsoft Entra ID, Google Workspace or Authentik.
+#
+# For a real install you do not run this file. You point SSO_ISSUER_URL at your own
+# provider and register Gather as a client there. See docs/sso.md.
+#
+# ⚠️ NEVER run this overlay anywhere anyone else can reach. The imported realm ships a
+#    known username and password, the admin console is open, and the issuer is plain http.
+#
+# ── The one awkward detail ───────────────────────────────────────────────────
+# An OIDC redirect goes through the *browser*, while the token exchange happens
+# *server-side*. Both must reach the provider at the same address, because the `iss` in the
+# resulting token is compared against the configured issuer.
+#
+# So the issuer is `http://keycloak:8081` — a name that resolves inside the compose network
+# by default, and which the test browser is told to resolve to 127.0.0.1 (see the `sso`
+# project in playwright.config.ts). Using `localhost` instead would mean the container
+# resolving it to itself.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    restart: unless-stopped
+    command: ['start-dev', '--import-realm', '--http-port=8081']
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: 'true'
+      # Pinned rather than derived from the Host header, so the issuer in every token is
+      # the same string Gather validates against however the request arrived.
+      KC_HOSTNAME: http://keycloak:8081
+      KC_HOSTNAME_STRICT: 'false'
+    volumes:
+      - ./docker/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro
+    ports:
+      - '${KEYCLOAK_PORT:-8081}:8081'
+    healthcheck:
+      # Keycloak 26 serves health on management port 9000, and the image has no curl or
+      # wget — so this asks over bash's own /dev/tcp, which is always there.
+      test:
+        [
+          'CMD-SHELL',
+          'exec 3<>/dev/tcp/127.0.0.1/9000 && printf "GET /health/ready HTTP/1.0\r\n\r\n" >&3 && grep -q UP <&3',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+
+  web:
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      SSO_ISSUER_URL: ${SSO_ISSUER_URL:-http://keycloak:8081/realms/gather}
+      SSO_CLIENT_ID: ${SSO_CLIENT_ID:-gather}
+      SSO_CLIENT_SECRET: ${SSO_CLIENT_SECRET:-gather-dev-client-secret}
+      SSO_PROVIDER_NAME: ${SSO_PROVIDER_NAME:-Keycloak}
+      SSO_ALLOWED_DOMAINS: ${SSO_ALLOWED_DOMAINS:-}
+      # Development only, and the app says so at boot. See the ⚠️ above.
+      SSO_ALLOW_INSECURE_ISSUER: 'true'
+      GATHER_SSO_ENFORCED: ${GATHER_SSO_ENFORCED:-false}
+      GATHER_SSO_AUTO_JOIN: ${GATHER_SSO_AUTO_JOIN:-false}
+      GATHER_SSO_DEFAULT_ROLE: ${GATHER_SSO_DEFAULT_ROLE:-member}

@@ -36,6 +36,19 @@ export async function startTwoFactorSetup(
       headers: await headers(),
     });
 
+    // Better Auth 1.7 returns a union: `{ method: 'otp' }` when the install is set up to
+    // send codes by email, `{ method: 'totp', … }` for an authenticator app. Gather only
+    // enables the authenticator, so the other arm means the plugin was reconfigured — and
+    // saying so beats reading `undefined.totpURI`.
+    if (result.method !== 'totp') {
+      return {
+        error:
+          'This install is not configured for an authenticator app, so there is nothing to ' +
+          'scan. Check the twoFactor plugin configuration.',
+        enrolment: null,
+      };
+    }
+
     const totpUri = result.totpURI;
     const secret = new URL(totpUri).searchParams.get('secret') ?? '';
     const qrDataUrl = await QRCode.toDataURL(totpUri, { margin: 1, width: 232 });

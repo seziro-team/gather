@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { ROLE_LABELS } from '@gather/core';
 import { ActionForm } from '@/components/action-form';
 import { Alert, Card, Field, Input } from '@/components/ui';
-import { isSignupAllowed } from '@/lib/auth';
+import { isSignupAllowed, passwordsEnabled, ssoProviderName } from '@/lib/auth';
 import { getSessionUser } from '@/lib/session';
 import { lookupInvite } from '@/lib/team';
 import { signUpAction } from '../actions';
@@ -37,6 +37,28 @@ export default async function SignUpPage({
   }
 
   const invited = invite?.ok ? invite : null;
+
+  // No password to set on an install that signs in through a provider. Sending somebody
+  // to a form they cannot complete is worse than telling them where to go.
+  if (!passwordsEnabled()) {
+    return (
+      <Card>
+        <h1 className="text-xl font-semibold text-slate-900">Sign in with {ssoProviderName()}</h1>
+        <p className="mt-4 text-sm text-slate-600">
+          This install has no Gather passwords — accounts come from {ssoProviderName()}. Sign in
+          there and you will land back here.
+        </p>
+        <p className="mt-6 text-sm text-slate-600">
+          <Link
+            href={token ? `/sign-in?next=${encodeURIComponent(`/join/${token}`)}` : '/sign-in'}
+            className="text-brand-700 font-medium underline"
+          >
+            Go to sign in
+          </Link>
+        </p>
+      </Card>
+    );
+  }
 
   if (!invited && !(await isSignupAllowed())) {
     return (
