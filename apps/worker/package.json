@@ -10,7 +10,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --enable-source-maps dist/main.js",
     "clean": "rm -rf dist",
-    "retention:purge": "node --enable-source-maps dist/cli/retention-purge.js"
+    "retention:purge": "node --enable-source-maps dist/cli/retention-purge.js",
+    "keys:rotate": "node --enable-source-maps dist/cli/rotate-key.js",
+    "audit:anchor": "node --enable-source-maps dist/cli/audit-anchor.js"
   },
   "dependencies": {
     "@gather/core": "workspace:*",

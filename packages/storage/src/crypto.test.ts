@@ -3,11 +3,13 @@ import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import {
+  canUnwrap,
   createDecryptor,
   createEncryptor,
   EncryptionKeyError,
   generateMasterKey,
   parseMasterKey,
+  rewrapDek,
   type Envelope,
 } from './crypto.js';
 
@@ -121,5 +123,74 @@ describe('envelope encryption', () => {
     expect(() => createDecryptor(master, OBJECT_KEY, { ...envelope, dekWrapped: 'AAAA' })).toThrow(
       EncryptionKeyError,
     );
+  });
+});
+
+describe('rotating the master key', () => {
+  const storageKey = 'firms/abc/requests/def/files/ghi';
+
+  it('re-wraps the DEK so the same ciphertext opens under the new key', async () => {
+    const oldMaster = parseMasterKey(generateMasterKey());
+    const newMaster = parseMasterKey(generateMasterKey());
+    const plaintext = Buffer.from('the client’s bank statement, 42 pages');
+
+    const encryptor = createEncryptor(oldMaster, storageKey);
+    const ciphertext = Buffer.concat([
+      encryptor.cipher.update(plaintext),
+      encryptor.cipher.final(),
+    ]);
+    const envelope = encryptor.envelope();
+
+    // The whole point: only the wrapped key changes. Nothing reads or rewrites the object,
+    // which is why rotating a terabyte costs the same as rotating a byte.
+    const rewrapped = rewrapDek(oldMaster, newMaster, storageKey, envelope.dekWrapped);
+    expect(rewrapped).not.toBe(envelope.dekWrapped);
+
+    const decryptor = createDecryptor(newMaster, storageKey, {
+      ...envelope,
+      dekWrapped: rewrapped,
+    });
+    const recovered = Buffer.concat([decryptor.update(ciphertext), decryptor.final()]);
+    expect(recovered.toString()).toBe(plaintext.toString());
+  });
+
+  it('leaves the old key unable to open a rotated file', async () => {
+    const oldMaster = parseMasterKey(generateMasterKey());
+    const newMaster = parseMasterKey(generateMasterKey());
+    const encryptor = createEncryptor(oldMaster, storageKey);
+    encryptor.cipher.final();
+    const envelope = encryptor.envelope();
+    const rewrapped = rewrapDek(oldMaster, newMaster, storageKey, envelope.dekWrapped);
+
+    // Rotation that left the old key working would not be rotation.
+    expect(canUnwrap(oldMaster, storageKey, rewrapped)).toBe(false);
+    expect(canUnwrap(newMaster, storageKey, rewrapped)).toBe(true);
+  });
+
+  it('tells a rotated file from an unrotated one, so a rerun is safe', async () => {
+    // What makes the CLI resumable: an interrupted rotation is just one that has not
+    // finished, and running it again skips what it already did.
+    const oldMaster = parseMasterKey(generateMasterKey());
+    const newMaster = parseMasterKey(generateMasterKey());
+    const encryptor = createEncryptor(oldMaster, storageKey);
+    encryptor.cipher.final();
+    const { dekWrapped } = encryptor.envelope();
+
+    expect(canUnwrap(newMaster, storageKey, dekWrapped)).toBe(false);
+    expect(canUnwrap(oldMaster, storageKey, dekWrapped)).toBe(true);
+  });
+
+  it('refuses to move key material between files', async () => {
+    // The AAD binds the wrapped DEK to its object. Without that, swapping `dek_wrapped`
+    // between two rows would unwrap cleanly and hand one client's key to another's file.
+    const oldMaster = parseMasterKey(generateMasterKey());
+    const newMaster = parseMasterKey(generateMasterKey());
+    const encryptor = createEncryptor(oldMaster, storageKey);
+    encryptor.cipher.final();
+    const { dekWrapped } = encryptor.envelope();
+
+    expect(() =>
+      rewrapDek(oldMaster, newMaster, 'firms/abc/requests/def/files/SOMEBODY-ELSE', dekWrapped),
+    ).toThrow(EncryptionKeyError);
   });
 });
