@@ -1735,6 +1735,74 @@ question turned out to be the most important thing in this entry.
      with a message that says exactly that. Worth recording only because "everything failed
      instantly" reads like a catastrophe and was a download.
 
+  **CodeQL paid for itself on its first run**, and CI caught two things no local run could.
+
+  Eight alerts on the pull request that introduced it — one high, seven medium — and every
+  one was real:
+
+  - **`js/polynomial-redos` (high)** in `packages/core/src/sso.ts`. Trimming trailing
+    slashes with `replace(/\/+$/, '')` backtracks polynomially: an input of many slashes
+    makes the engine retry every split point. Only reachable from an operator's own
+    configuration, so the practical risk was small — but it is a real defect, and a loop is
+    both faster and impossible to get wrong. Now covered by a test that trims 100,000
+    slashes in under a second.
+  - **`actions/unpinned-tag` (medium × 6)** — third-party actions referenced by moving tag.
+    A tag can be repointed at any commit by whoever owns the repository, so a supply-chain
+    compromise upstream becomes one here silently. Pinned to commit SHAs, with the tag kept
+    in a comment.
+  - **`actions/missing-workflow-permissions` (medium)** — `ci.yml` had no `permissions:`
+    block, so every job ran with a token that can push commits and open pull requests, while
+    running `pnpm install` and third-party postinstall scripts. Now `contents: read` at the
+    top of the file, and jobs ask for more only if they need it.
+
+  And the SSO job failed in CI while passing locally, for a reason worth keeping:
+
+  ```
+  Expected substring: "Keycloak"
+  Received string:    "Sign in with your organisation"
+  ```
+
+  CI does `cp .env.example .env`, and this pass had just added `SSO_PROVIDER_NAME=your
+  organisation` to that file. Compose substitutes `${SSO_PROVIDER_NAME:-Keycloak}` from
+  `.env`, so the overlay's default never applied. It passed here only because this machine's
+  `.env` predates the setting. Confirmed by `docker compose config` rather than guessed, and
+  fixed where it belongs: the fixture now names itself in `scripts/sso-e2e.sh`, where a
+  shell variable beats `.env`.
+
+  A third, found while re-reading rather than by any tool: `attachToSoleFirm` carried a
+  comment saying it was silent on failure, and let the exception escape into Better Auth's
+  user-create hook — where it would have failed the sign-in of somebody the provider had
+  already authenticated. The comment was right about what it should do; the code was not.
+
+  And a fourth, which the provider-name fix uncovered underneath itself: **Better Auth 1.7
+  moved generic-OAuth sign-in onto the social path**, under a minor version bump and with no
+  type error. `/api/auth/sign-in/oauth2` became `/api/auth/sign-in/social` with
+  `{ provider }` rather than `{ providerId }`, and the redirect URI moved from
+  `/api/auth/oauth2/callback/sso` to `/api/auth/callback/sso`. The plugin registers no
+  endpoints of its own any more, so the old URL is simply a 404 and the button did nothing.
+
+  Nothing static caught it — the config still typechecks, and the app still boots and draws
+  the button. It took reproducing the plugin's `init` in isolation and listing what the
+  instance actually exposes:
+
+  ```
+  all api keys: … signInEmail, signInSocial, signOut, signUpEmail …
+  # no signInWithOAuth2, no oAuth2Callback — the plugin contributes none
+  signInSocial({provider:"sso"}) → {"url":"http://keycloak:8081/realms/gather/protocol/…"}
+  ```
+
+  Worth recording as the argument for the Keycloak suite existing at all: a dependency
+  upgrade silently removed the endpoint the entire feature is built on, and the only thing
+  that could have noticed is a test that drives a real provider end to end.
+
+  Fixing that then exposed a fifth, in the fixture rather than the product: Keycloak imports
+  a realm **only into a fresh container**. `start-dev` keeps its H2 database inside the
+  container, and compose does not recreate a service because a mounted file's contents
+  changed — so the redirect URI in `keycloak-realm.json` was updated on disk and ignored, and
+  Keycloak answered `Invalid parameter: redirect_uri` against a realm that looked correct
+  when you read it. `scripts/sso-e2e.sh` now replaces the container each run, which costs
+  twenty seconds and removes a whole category of "but I changed that".
+
 - **Deviations from plan:** none — this is work beyond plan.md §9, which ended at Phase 8.
   `plan.md` §7.1 is updated to list SSO in the free tier.
 
