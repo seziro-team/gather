@@ -11,27 +11,27 @@
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@better-auth/drizzle-adapter": "^1.6.25",
+    "@better-auth/drizzle-adapter": "^1.7.3",
     "@gather/billing": "workspace:*",
     "@gather/core": "workspace:*",
     "@gather/db": "workspace:*",
     "@gather/mail": "workspace:*",
     "@gather/reminders": "workspace:*",
     "@gather/storage": "workspace:*",
-    "better-auth": "^1.6.25",
+    "better-auth": "^1.7.3",
     "drizzle-orm": "^0.45.2",
-    "next": "^16.2.12",
+    "next": "^16.3.4",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "yazl": "^3.3.1",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/qrcode": "^1.5.5",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
     "@types/yazl": "^3.3.1",
     "tailwindcss": "^4.3.3"
   }
