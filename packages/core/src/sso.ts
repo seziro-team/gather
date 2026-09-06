@@ -55,7 +55,7 @@ export function ssoConfig(settings: SsoSettings): SsoConfig | null {
   const { issuerUrl, clientId, clientSecret } = settings;
   if (!issuerUrl || !clientId || !clientSecret) return null;
 
-  const issuer = issuerUrl.replace(/\/+$/, '');
+  const issuer = withoutTrailingSlashes(issuerUrl);
   return {
     providerId: SSO_PROVIDER_ID,
     // Built rather than configured: every OIDC provider serves discovery at this path, and
@@ -67,6 +67,20 @@ export function ssoConfig(settings: SsoSettings): SsoConfig | null {
     scopes: settings.scopes.split(/[\s,]+/).filter(Boolean),
     providerName: settings.providerName,
   };
+}
+
+/**
+ * Trim trailing slashes, without a regular expression.
+ *
+ * `replace(/\/+$/, '')` reads better and is a polynomial-backtracking ReDoS: an input of
+ * many slashes makes the engine retry every split point. Reachable only from an operator's
+ * own configuration here, so the practical risk was small — but CodeQL was right to flag it,
+ * and a loop is both faster and impossible to get wrong.
+ */
+function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return value.slice(0, end);
 }
 
 /**

@@ -51,6 +51,18 @@ describe('configuration', () => {
     ).toBe('https://login.example.com/realms/staff/.well-known/openid-configuration');
   });
 
+  it('trims trailing slashes in linear time, however many there are', () => {
+    // CodeQL flagged the regex this replaced as polynomial-backtracking. 100k slashes is
+    // not a realistic configuration; it is the shape of input that used to make the engine
+    // retry every split point, and the assertion is that it now does not.
+    const started = Date.now();
+    const absurd = `https://login.example.com/realms/staff${'/'.repeat(100_000)}`;
+    expect(ssoConfig({ ...on, issuerUrl: absurd })?.issuer).toBe(
+      'https://login.example.com/realms/staff',
+    );
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it('splits scopes on whitespace or commas, because both get typed', () => {
     expect(ssoConfig(on)?.scopes).toEqual(['openid', 'profile', 'email']);
     expect(ssoConfig({ ...on, scopes: 'openid, profile , email,groups' })?.scopes).toEqual([
