@@ -1,0 +1,49 @@
+name: CodeQL
+
+# Static analysis for security defects — the class of bug a test suite does not look for,
+# because a test asks "does this do what I meant" and CodeQL asks "does this do something
+# I did not mean". Results land in the Security tab and annotate pull requests.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, because the queries improve even when the code does not: a rule added next
+    # month can find a defect written last year, and nothing would run it otherwise.
+    - cron: '31 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyse ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Writing the results is the whole point.
+      security-events: write
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript-typescript', 'actions']
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # Beyond the default set: the extra queries are noisier, and on a codebase that
+          # handles other people's tax documents that is the right trade.
+          queries: security-and-quality
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:${{ matrix.language }}'

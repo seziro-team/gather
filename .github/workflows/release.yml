@@ -1,0 +1,128 @@
+name: Release artefacts
+
+# What a release has to carry beyond a tarball, for anyone who has to answer "what is in
+# the thing you deployed":
+#
+#   • an SBOM, so a CVE announcement can be answered with "yes, version X" rather than an
+#     afternoon of grepping lockfiles
+#   • a container image with a provenance attestation, so the image can be traced back to
+#     the commit and the workflow run that built it
+#
+# Runs on a tag, and can be run by hand against any ref for a dry run.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22.20.0'
+  REGISTRY: ghcr.io
+
+jobs:
+  sbom:
+    name: Software bill of materials
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # CycloneDX, because it is what most vulnerability tooling ingests and because
+      # `--prod` is the honest scope: what ships, not what builds it.
+      - name: Generate the SBOM
+        run: |
+          pnpm dlx @cyclonedx/cyclonedx-npm@latest \
+            --omit dev \
+            --output-format JSON \
+            --output-file gather-sbom.cdx.json \
+            --package-lock-only || \
+          pnpm dlx @cyclonedx/cyclonedx-npm@latest \
+            --omit dev \
+            --output-format JSON \
+            --output-file gather-sbom.cdx.json
+
+      - name: Summarise it
+        run: |
+          echo "### SBOM" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Components: $(jq '.components | length' gather-sbom.cdx.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Spec: $(jq -r '.specVersion' gather-sbom.cdx.json)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: gather-sbom.cdx.json
+          retention-days: 90
+
+      - name: Attach it to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" gather-sbom.cdx.json --clobber
+
+  image:
+    name: Container image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Lets the build sign a provenance statement for what it produced.
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: ${{ startsWith(github.ref, 'refs/tags/') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Records the build inputs inside the image, so `docker buildx imagetools
+          # inspect` answers "which commit is this" without trusting a tag.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest what was built
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

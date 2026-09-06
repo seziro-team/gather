@@ -1,13 +1,18 @@
 import { sql } from 'drizzle-orm';
 import { getDb, getMigrationStatus } from '@gather/db';
 
-/** Never cached: this is a liveness signal, and Docker's healthcheck polls it. */
+/** Never cached: an orchestrator polls it, and a cached answer is not an answer. */
 export const dynamic = 'force-dynamic';
 
 /**
- * Reports whether Gather can actually serve traffic, not merely whether the process is
- * up: the database must answer and the schema must be current. `docker compose up`
- * waits on this, so it has to mean something.
+ * Readiness. Should this instance be sent traffic?
+ *
+ * The database must answer and the schema must be current — `docker compose up` waits on
+ * this, so it has to mean something more than "the process started".
+ *
+ * Its counterpart is `/api/live`, which checks nothing and exists so that a database blip
+ * makes instances *unready* rather than getting them restarted. Point a Kubernetes
+ * livenessProbe at `/api/live` and a readinessProbe here.
  */
 export async function GET(): Promise<Response> {
   let db: 'ok' | 'unreachable' = 'unreachable';
