@@ -4,6 +4,11 @@
 client portal with encrypted uploads; reminder engine; review, dashboard and evidence export;
 security hardening; team roles and the hosted tier; the site and launch material.
 
+**Since v0.1.0**, beyond the plan: single sign-on over OIDC (free, proven against a real
+Keycloak), pagination and search everywhere, key rotation, audit anchoring, liveness/
+readiness split, Prometheus metrics, CodeQL and SBOM in CI — and the repository made public.
+See the last entry in `progress.md`.
+
 **The one thing that is not proven:** Stripe billing has never completed a call, because this
 build has never had a Stripe account. `docs/stripe-verification.md` is the procedure that closes
 it. Self-hosting — which is the whole product — is unaffected. Three features planned for Cloud
@@ -518,6 +523,18 @@ Plus, specific to this threat model:
   as zip, full audit trail + export.
 - **Storage** — local disk or any S3-compatible endpoint. **Encrypted at rest either way.**
 - **Email** — Resend or your own SMTP.
+- **Team roles and invitations** — owner / admin / member, ten named permissions.
+  *(P7: shipped. Originally priced as a paid feature; moved to free, because a two-person
+  firm self-hosting needs them exactly as much as a hosted one.)*
+- **Single sign-on (OIDC)** — Okta, Microsoft Entra ID, Google Workspace, Keycloak,
+  Authentik. Discovery-driven; enforceable, so there are no Gather passwords at all.
+  *(Post-v0.1.0: shipped, proven against a real Keycloak. Free on purpose — charging extra
+  to turn on the security control you want people to use is a practice this project will
+  not adopt, and it is the same boundary-rule argument as team roles.)*
+- **Key rotation and audit anchoring** — `keys:rotate`, `audit:anchor`.
+  *(Post-v0.1.0: shipped. Both were documented gaps in SECURITY.md.)*
+- **Operable** — separate liveness and readiness, Prometheus metrics behind a token,
+  structured logs. *(Post-v0.1.0: shipped.)*
 - **No caps** on requests, clients, seats or storage. Ever.
 
 ### 7.2 PAID — Gather Cloud (live day 1)

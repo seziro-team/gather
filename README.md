@@ -121,9 +121,24 @@ yourself if you would rather hold it in your own secret store.
   someone the link; invitations expire, can be revoked, work once, and are audited. A
   colleague with no account signs up **through** the invitation, even on an install where
   sign-ups are closed.
-- **Health endpoint, structured JSON logs, one-command Docker deployment**, and
-  `docker-compose.prod.yml` for a real server: Caddy, automatic Let's Encrypt TLS, HSTS,
-  nightly `pg_dump`, and nothing but the proxy listening.
+- **Single sign-on**, over OIDC, against your own identity provider — Okta, Entra ID, Google
+  Workspace, Keycloak, Authentik. Also free, because charging extra for the security control
+  you want people to use is a practice this project will not adopt.
+  `GATHER_SSO_ENFORCED=true` turns off Gather passwords entirely, so joiners and leavers
+  live in one system. Proven end to end against a real Keycloak, not a mock —
+  [`docs/sso.md`](docs/sso.md).
+- **Built to stay usable at size.** Every list is paged and searchable; nothing loads a
+  firm's whole table to render a page.
+- **Key rotation and audit anchoring.** `pnpm keys:rotate` moves every stored file onto a
+  new encryption key — 167 files in 1.7 seconds in our own run, because only the per-file
+  keys are re-wrapped and no ciphertext is rewritten. `pnpm audit:anchor` writes the audit
+  head somewhere the database cannot reach, and tells you if history is ever rewritten.
+- **Made to operate.** Separate liveness (`/api/live`) and readiness (`/api/health`) so a
+  database blip makes instances unready instead of restarting them; Prometheus metrics at
+  `/api/metrics` behind a token, off unless you set one; structured JSON logs with secrets
+  redacted; one-command Docker deployment, and `docker-compose.prod.yml` for a real server —
+  Caddy, automatic Let's Encrypt TLS, HSTS, nightly `pg_dump`, nothing but the proxy
+  listening.
 
 Not built: SMS reminders, e-signature and Drive/Dropbox/OneDrive sync. They were planned for
 the hosted tier and were **cut rather than stubbed** — each needs a third-party account
@@ -191,6 +206,7 @@ pnpm verify:audit --csv gather-audit-2026-09-05.csv
 | ORM       | Drizzle                            | Plain SQL migrations you can read before running        |
 | Auth      | Better Auth + TOTP                 | Self-hostable; satisfies 16 CFR 314.4(c)(5)             |
 | Storage   | Local disk (default) or any S3 API | Zero extra services by default                          |
+| SSO       | OIDC, via your own provider        | Discovery-driven, so no provider is named in the code   |
 | Styling   | Tailwind CSS v4                    | No web fonts, no external requests                      |
 
 Full reasoning, competitor teardown and the security checklist are in [`plan.md`](plan.md).
@@ -269,8 +285,24 @@ No domain appears anywhere in the repo — every hostname is an environment vari
    volume, on the same disk as the database it is protecting. `docker compose cp` it to
    somewhere else, on a schedule you check.
 2. **Keep `GATHER_ENCRYPTION_KEY` somewhere other than the server.** Without it the stored
-   files cannot be read, and there is no recovery and no key rotation — see
-   [`docs/incident-response.md`](docs/incident-response.md).
+   files cannot be read — see [`docs/incident-response.md`](docs/incident-response.md).
+
+Two more worth putting on a schedule:
+
+```bash
+# Rotate the encryption key. Only the per-file keys are re-wrapped, so this is fast
+# however much you are storing — and it is a dry run until you add --confirm.
+GATHER_ENCRYPTION_KEY_NEW="$(openssl rand -base64 32)" \
+  docker compose exec -T worker node dist/cli/rotate-key.js --confirm
+
+# Anchor the audit head where the database cannot reach it, and check the old anchors.
+docker compose exec -T worker node dist/cli/audit-anchor.js --write
+docker compose exec -T worker node dist/cli/audit-anchor.js --verify
+```
+
+The anchor is the answer to the honest caveat in [SECURITY.md](SECURITY.md): the hash chain
+is tamper _evidence_, and somebody who can write to your database can rewrite history and
+recompute it. They cannot recompute a hash you wrote down somewhere else last Tuesday.
 
 ## Running it as a service for other firms
 
@@ -359,6 +391,8 @@ Gather handles tax documents, so the security posture is written down rather tha
   and it says so.
 - **[`docs/incident-response.md`](docs/incident-response.md)** — a template to fill in
   before you need it.
+- **[`docs/sso.md`](docs/sso.md)** — setting up single sign-on against your own identity
+  provider, including what each setting really does and what is deliberately not built.
 - **[SECURITY.md](SECURITY.md)** — reporting a vulnerability in Gather itself.
 
 ## Built on

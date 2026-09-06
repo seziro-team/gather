@@ -69,6 +69,10 @@ const faqs = [
     a: 'It ships controls that map to specific elements — multi-factor authentication on staff accounts, encryption at rest and in transit, access controls, a tamper-evident audit log, and a disposal command. What it cannot do is make a firm compliant: most of the Rule is about your written plan, your risk assessment and your people. The repo has an honest mapping of what Gather does and the longer list of what it does not do for you.',
   },
   {
+    q: 'Does it do single sign-on?',
+    a: 'Yes, over OIDC, against your own identity provider — Okta, Microsoft Entra ID, Google Workspace, Keycloak, Authentik. It reads the provider’s discovery document rather than hard-coding endpoints, so switching providers is a URL change. Enforce it and there are no Gather passwords at all, which is the point: joiners and leavers live in one system, and an account disabled there cannot get in here either. It is in the free product, not behind a plan — charging extra for the security control you want people to use is a practice we will not adopt.',
+  },
+  {
     q: 'Can I use my own domain, my own SMTP and my own storage?',
     a: 'Yes, and nothing phones home. Every setting is an environment variable, documented with its default and where to obtain it. Reminders go through Resend or any SMTP server you already have, and `pnpm check:email` reads your SPF, DKIM and DMARC records and sends a real test message before you trust it.',
   },
