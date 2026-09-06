@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { Alert, Badge, Card, linkButton, PageHeader } from '@/components/ui';
-import { listClients } from '@/lib/clients';
+import { parsePage, parseSearch } from '@gather/core';
+import { Pager, SearchBox } from '@/components/pager';
+import { pickableClients } from '@/lib/clients';
 import { listRequests } from '@/lib/requests';
 import { requireReadyUser } from '@/lib/session';
 
@@ -26,11 +28,18 @@ const STATUS_LABEL = {
   archived: 'Archived',
 } as const;
 
-export default async function RequestsPage() {
+export default async function RequestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
   const { membership } = await requireReadyUser();
+  const query = await searchParams;
+  const search = parseSearch(query.q);
+
   const [requests, clients] = await Promise.all([
-    listRequests(membership.firm.id),
-    listClients(membership.firm.id),
+    listRequests(membership.firm.id, { search, page: parsePage(query.page) }),
+    pickableClients(membership.firm.id),
   ]);
 
   const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -62,17 +71,26 @@ export default async function RequestsPage() {
         </Alert>
       ) : null}
 
-      {requests.length === 0 ? (
+      {clients.length > 0 ? (
+        <SearchBox
+          action="/requests"
+          value={search ?? ''}
+          placeholder="Search by title, client or email"
+        />
+      ) : null}
+
+      {requests.total === 0 ? (
         clients.length > 0 ? (
-          <Alert tone="info" title="No requests yet">
-            Start from one of the four included templates and you will have a real checklist in
-            about ten seconds.
+          <Alert tone="info" title={search ? 'Nothing matched' : 'No requests yet'}>
+            {search
+              ? `No request matches “${search}”. Clear the search to see them all.`
+              : 'Start from one of the four included templates and you will have a real checklist in about ten seconds.'}
           </Alert>
         ) : null
       ) : (
         <Card className="p-0">
           <ul className="divide-y divide-slate-100">
-            {requests.map((entry) => (
+            {requests.rows.map((entry) => (
               <li key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-4">
                 <div className="min-w-0">
                   <Link
@@ -95,6 +113,14 @@ export default async function RequestsPage() {
               </li>
             ))}
           </ul>
+          <div className="px-6 pb-4">
+            <Pager
+              page={requests}
+              basePath="/requests"
+              unit="request"
+              params={{ q: search ?? undefined }}
+            />
+          </div>
         </Card>
       )}
     </div>

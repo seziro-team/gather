@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
-import { getDb, listFirms, platformTotals, recordAuditEvent } from '@gather/db';
+import { paginate, type Page } from '@gather/core';
+import { countFirms, getDb, listFirms, platformTotals, recordAuditEvent } from '@gather/db';
 import { isPlatformAdmin } from './cloud';
 import { requireUser, type SessionUser } from './session';
 
@@ -21,19 +22,24 @@ export async function requirePlatformAdmin(): Promise<SessionUser> {
   return user;
 }
 
-export async function readAdminOverview() {
+export async function readAdminOverview(page: Page) {
   const user = await requirePlatformAdmin();
   const head = await headers();
   const db = getDb();
 
-  const [firms, totals] = await Promise.all([listFirms(db), platformTotals(db)]);
+  const [rows, total, totals] = await Promise.all([
+    listFirms(db, page),
+    countFirms(db),
+    platformTotals(db),
+  ]);
+  const firms = paginate(rows, total, page);
 
   await recordAuditEvent(db, {
     action: 'admin.console_viewed',
     actorType: 'user',
     actorId: user.id,
     targetType: 'platform',
-    metadata: { firms: firms.length },
+    metadata: { firms: total, page: page.number },
     ip: head.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
     ua: head.get('user-agent'),
   });

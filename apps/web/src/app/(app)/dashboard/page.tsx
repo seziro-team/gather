@@ -6,11 +6,14 @@ import {
   countRequests,
   firmTotals,
   getDb,
+  countRequestSummaries,
   listRequestSummaries,
   percentComplete,
   type RequestFilter,
   type RequestSummary,
 } from '@gather/db';
+import { paginate, parsePage } from '@gather/core';
+import { Pager } from '@/components/pager';
 import { Alert, Badge, Card, linkButton } from '@/components/ui';
 import { ACTION_LABELS } from '@/lib/audit-labels';
 import { formatDueDate } from '@/lib/format';
@@ -75,7 +78,7 @@ function waitingFor(summary: RequestSummary, now: Date): string | null {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; page?: string }>;
 }) {
   const { membership } = await requireReadyUser();
   const db = getDb();
@@ -84,15 +87,17 @@ export default async function DashboardPage({
   const params = await searchParams;
   // Default to the queue rather than to everything: the firm opens this to find work.
   const filter: RequestFilter = isFilter(params.filter) ? params.filter : 'needs-review';
+  const page = parsePage(params.page);
 
-  const [clientCount, totalRequests, totals, summaries, recent] = await Promise.all([
+  const [clientCount, totalRequests, totals, summaries, filtered, recent] = await Promise.all([
     db
       .select({ total: count() })
       .from(client)
       .where(and(eq(client.firmId, firmId), isNull(client.archivedAt))),
     countRequests(db, firmId),
     firmTotals(db, firmId),
-    listRequestSummaries(db, firmId, filter),
+    listRequestSummaries(db, firmId, filter, page),
+    countRequestSummaries(db, firmId, filter),
     db
       .select()
       .from(auditEvent)
@@ -243,6 +248,13 @@ export default async function DashboardPage({
             })}
           </ul>
         )}
+
+        <Pager
+          page={paginate(summaries, filtered, page)}
+          basePath="/dashboard"
+          unit="request"
+          params={{ filter }}
+        />
       </Card>
 
       <Card>

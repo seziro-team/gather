@@ -75,7 +75,17 @@ function fromEpoch(value: string | null): Date | null {
  * One query with correlated sub-selects rather than N+1 across firms: an operator page that
  * gets slower with every customer is a page that stops being opened.
  */
-export async function listFirms(db: Db, limit = 200): Promise<AdminFirmRow[]> {
+export async function countFirms(db: Db): Promise<number> {
+  const { rows } = await db.execute<{ total: string }>(
+    sql`select count(*)::text as total from firm`,
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
+export async function listFirms(
+  db: Db,
+  page: { size: number; offset: number } = { size: 200, offset: 0 },
+): Promise<AdminFirmRow[]> {
   const { rows } = await db.execute<RawFirmRow>(sql`
     select
       f.id,
@@ -107,7 +117,7 @@ export async function listFirms(db: Db, limit = 200): Promise<AdminFirmRow[]> {
     from firm f
     left join subscription s on s.firm_id = f.id
     order by f.created_at desc
-    limit ${limit}
+    limit ${page.size} offset ${page.offset}
   `);
 
   return rows.map((row: RawFirmRow) => {
