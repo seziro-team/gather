@@ -337,6 +337,7 @@ export async function listRequestSummaries(
   db: Database | DbTransaction,
   firmId: string,
   filter: RequestFilter = 'all',
+  page?: { size: number; offset: number },
 ): Promise<RequestSummary[]> {
   const counts = db
     .select({
@@ -404,7 +405,12 @@ export async function listRequestSummaries(
     .leftJoin(counts, eq(counts.requestId, request.id))
     .leftJoin(reminders, eq(reminders.requestId, request.id))
     .where(and(eq(request.firmId, firmId), whereForFilter(filter)))
-    .orderBy(desc(request.updatedAt));
+    .orderBy(desc(request.updatedAt))
+    // Bounded when the caller says so. Unbounded is still the default because the audit
+    // export and the reminder scan legitimately want every row; a *page* is what the
+    // dashboard wants, and it used to render all of them.
+    .limit(page?.size ?? Number.MAX_SAFE_INTEGER)
+    .offset(page?.offset ?? 0);
 
   // The two aggregate timestamps come back as strings, not Dates.
   //
@@ -458,6 +464,19 @@ export interface FirmTotals {
   needsReview: number;
   overdue: number;
   complete: number;
+}
+
+/** How many requests a filter would return. Paired with `listRequestSummaries`. */
+export async function countRequestSummaries(
+  db: Database | DbTransaction,
+  firmId: string,
+  filter: RequestFilter = 'all',
+): Promise<number> {
+  const [row] = await db
+    .select({ total: count() })
+    .from(request)
+    .where(and(eq(request.firmId, firmId), whereForFilter(filter)));
+  return row?.total ?? 0;
 }
 
 export async function firmTotals(

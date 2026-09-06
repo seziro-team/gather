@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import { appendAuditEvent } from './audit.js';
 import type { Database } from './client.js';
 import { file, item, request, response, section } from './schema/gather.js';
@@ -115,4 +115,66 @@ export async function markPurged(db: Database, candidate: PurgeCandidate): Promi
       },
     });
   });
+}
+
+// ── Key rotation ─────────────────────────────────────────────────────────────
+
+export interface WrappedFile {
+  id: string;
+  storageKey: string;
+  dekWrapped: string;
+}
+
+/**
+ * A page of encrypted files, oldest first.
+ *
+ * Keyed on `id` rather than an offset so that rotating while uploads continue cannot skip
+ * a row: new files sort after the cursor and are picked up by a later pass, and nothing
+ * shifts under the scan the way it would with `offset`.
+ *
+ * Purged files are excluded — there is no object left, so there is nothing to rotate.
+ */
+export async function wrappedFilesAfter(
+  db: Database,
+  after: string | null,
+  limit = 500,
+): Promise<WrappedFile[]> {
+  const rows = await db
+    .select({ id: file.id, storageKey: file.storageKey, dekWrapped: file.dekWrapped })
+    .from(file)
+    .where(
+      after
+        ? and(isNotNull(file.dekWrapped), isNull(file.purgedAt), gt(file.id, after))
+        : and(isNotNull(file.dekWrapped), isNull(file.purgedAt)),
+    )
+    .orderBy(asc(file.id))
+    .limit(limit);
+
+  return rows
+    .filter((row): row is WrappedFile => row.dekWrapped !== null)
+    .map((row) => ({ id: row.id, storageKey: row.storageKey, dekWrapped: row.dekWrapped }));
+}
+
+/** How many files hold key material that a rotation would have to move. */
+export async function countWrappedFiles(db: Database): Promise<number> {
+  const [row] = await db
+    .select({ total: count() })
+    .from(file)
+    .where(and(isNotNull(file.dekWrapped), isNull(file.purgedAt)));
+  return row?.total ?? 0;
+}
+
+/**
+ * Store re-wrapped key material.
+ *
+ * One statement per file rather than one for the batch: a half-applied batch would leave
+ * files whose recorded key does not match the key they were wrapped with, and *that* is the
+ * failure that loses documents. One row at a time is slower and cannot do that.
+ */
+export async function storeRewrappedDek(
+  db: Database,
+  fileId: string,
+  dekWrapped: string,
+): Promise<void> {
+  await db.update(file).set({ dekWrapped }).where(eq(file.id, fileId));
 }

@@ -9,6 +9,41 @@ what was decided and why, and what is still broken. This file is the summary.
 
 ## [Unreleased]
 
+### Added
+
+- **Single sign-on over OIDC** against your own identity provider — Okta, Microsoft Entra
+  ID, Google Workspace, Keycloak, Authentik. Discovery-driven, so no provider is named in
+  the code. `GATHER_SSO_ENFORCED` turns off Gather passwords entirely; `SSO_ALLOWED_DOMAINS`
+  limits which identities are admitted; `GATHER_SSO_AUTO_JOIN` provisions into the firm when
+  the install has exactly one. **In the free product**, like team roles. Proven end to end
+  against a real Keycloak — `pnpm test:sso`, and `docs/sso.md`.
+- **Pagination and search** on clients, requests, the dashboard and the operator console.
+  Every one of those previously loaded a firm's whole table to render a page.
+- **`pnpm keys:rotate`** — moves every stored file onto a new encryption key. Only the
+  per-file keys are re-wrapped, so no object is read and no ciphertext is rewritten: 167
+  files in 1.7 seconds. Dry run by default, resumable, and safe to re-run.
+- **`pnpm audit:anchor`** — writes the audit head somewhere the database cannot reach, and
+  re-checks past anchors. Closes the caveat `SECURITY.md` has always carried: the chain is
+  tamper evidence, and somebody who can write to the database can recompute it — but not a
+  hash you wrote down elsewhere last week.
+- **`/api/live`**, separate from `/api/health`, so a database blip makes instances unready
+  rather than restarting them. `/api/metrics` in Prometheus format behind a bearer token,
+  absent unless `GATHER_METRICS_TOKEN` is set.
+- **CodeQL** on every pull request and weekly; a release workflow producing a CycloneDX SBOM
+  and a container image with a signed provenance attestation.
+- `CODE_OF_CONDUCT.md`.
+
+### Changed
+
+- The repository is **public**, with branch protection requiring all six CI jobs, Dependabot
+  alerts, secret scanning with push protection, and private vulnerability reporting.
+- `SECURITY.md` rewritten. It still described encryption at rest, virus scanning and
+  retention as unshipped and advised against putting real client documents in Gather — all
+  of which shipped in Phases 3 and 6.
+- Dependencies brought current within their majors, including Better Auth 1.6 → 1.7, whose
+  `genericOAuth` now requires discovery to supply the issuer and JWKS before a provider is
+  registered.
+
 ## [0.1.0] — 2026-09-05
 
 The first release. The whole self-hosted product works end to end.

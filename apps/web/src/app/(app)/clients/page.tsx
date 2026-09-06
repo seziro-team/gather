@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { parsePage, parseSearch } from '@gather/core';
+import { Pager, SearchBox } from '@/components/pager';
 import { Alert, Badge, Card, linkButton, PageHeader } from '@/components/ui';
 import { listClients } from '@/lib/clients';
 import { requireReadyUser } from '@/lib/session';
@@ -10,11 +12,18 @@ export const metadata = { title: 'Clients · Gather' };
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ archived?: string }>;
+  searchParams: Promise<{ archived?: string; q?: string; page?: string }>;
 }) {
   const { membership } = await requireReadyUser();
-  const showArchived = (await searchParams).archived === '1';
-  const clients = await listClients(membership.firm.id, showArchived);
+  const query = await searchParams;
+  const showArchived = query.archived === '1';
+  const search = parseSearch(query.q);
+
+  const clients = await listClients(membership.firm.id, {
+    includeArchived: showArchived,
+    search,
+    page: parsePage(query.page),
+  });
 
   return (
     <div className="space-y-6">
@@ -26,6 +35,13 @@ export default async function ClientsPage({
             Add client
           </Link>
         }
+      />
+
+      <SearchBox
+        action="/clients"
+        value={search ?? ''}
+        placeholder="Search by name, email or company"
+        hidden={{ archived: showArchived ? '1' : undefined }}
       />
 
       <div className="text-sm">
@@ -40,14 +56,16 @@ export default async function ClientsPage({
         )}
       </div>
 
-      {clients.length === 0 ? (
-        <Alert tone="info" title="No clients yet">
-          Add the first one and you can build a request for them straight away.
+      {clients.total === 0 ? (
+        <Alert tone="info" title={search ? 'Nothing matched' : 'No clients yet'}>
+          {search
+            ? `No client matches “${search}”. Clear the search to see them all.`
+            : 'Add the first one and you can build a request for them straight away.'}
         </Alert>
       ) : (
         <Card className="p-0">
           <ul className="divide-y divide-slate-100">
-            {clients.map((entry) => (
+            {clients.rows.map((entry) => (
               <li key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-6 py-4">
                 <div className="min-w-0">
                   <Link
@@ -70,6 +88,14 @@ export default async function ClientsPage({
               </li>
             ))}
           </ul>
+          <div className="px-6 pb-4">
+            <Pager
+              page={clients}
+              basePath="/clients"
+              unit="client"
+              params={{ archived: showArchived ? '1' : undefined, q: search ?? undefined }}
+            />
+          </div>
         </Card>
       )}
     </div>

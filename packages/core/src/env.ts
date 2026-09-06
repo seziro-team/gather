@@ -52,7 +52,75 @@ const envSchema = z
     GATHER_AUTH_SECRET: z.string().min(32, 'must be at least 32 characters'),
     GATHER_ALLOW_SIGNUP: z.enum(['first-user-only', 'open', 'off']).default('first-user-only'),
     GATHER_REQUIRE_2FA: booleanish.default(true),
+
+    // ── Single sign-on (OIDC) ────────────────────────────────────────────────
+    /**
+     * Sign in through your own identity provider.
+     *
+     * Any OIDC provider with a discovery document: Okta, Microsoft Entra ID, Google
+     * Workspace, Keycloak, Authentik, Auth0. Gather reads the discovery document rather
+     * than hard-coding endpoints, so "which provider" is a URL, not a code change.
+     *
+     * Off by default. A firm running Gather for itself does not need it, and an
+     * authentication path nobody has configured is one more thing that can be wrong.
+     */
+    SSO_ISSUER_URL: optionalText,
+    SSO_CLIENT_ID: optionalText,
+    SSO_CLIENT_SECRET: optionalText,
+    /** What the button says. "Okta", "Entra ID" — whatever your staff will recognise. */
+    SSO_PROVIDER_NAME: z.string().trim().min(1).max(60).default('your organisation'),
+    SSO_SCOPES: z.string().trim().default('openid profile email'),
+    /**
+     * Allow an issuer served over plain http.
+     *
+     * ⚠️ Development only. An OIDC exchange over http hands the authorization code to
+     * anyone on the path. It exists because `docker-compose.sso.yml` runs a real Keycloak
+     * without a certificate, and pretending that needs no flag would mean either shipping
+     * a weaker rule for everybody or testing something other than the real thing.
+     */
+    SSO_ALLOW_INSECURE_ISSUER: booleanish.default(false),
+    /**
+     * Only these email domains may sign in, comma-separated (`@example.com`).
+     *
+     * Empty means "whatever the provider vouches for", which is right when the provider
+     * only holds your staff and wrong when it is a shared tenant.
+     */
+    SSO_ALLOWED_DOMAINS: optionalText,
+    /**
+     * Turn off password sign-in entirely.
+     *
+     * The point of enterprise SSO: joiners and leavers are managed in one place, and an
+     * account disabled in the IdP cannot get in here either. With this on there is no
+     * password to phish and no local password to rotate.
+     */
+    GATHER_SSO_ENFORCED: booleanish.default(false),
+    /**
+     * Treat the IdP's authentication as the second factor.
+     *
+     * Only consulted when SSO is enforced. Your provider is doing MFA — asking for a
+     * second TOTP on top is theatre that pushes people towards weaker choices. Set it to
+     * false if your IdP does not enforce MFA and you want Gather to.
+     */
+    GATHER_SSO_SATISFIES_2FA: booleanish.default(true),
+    /**
+     * Put new SSO users straight into the firm, when this install has exactly one.
+     *
+     * The common enterprise shape: one firm, staff managed in the IdP, nobody wanting to
+     * send an invitation for each. Off by default, because on an install with more than
+     * one firm there is no safe answer to "which one" — and Gather refuses to guess.
+     */
+    GATHER_SSO_AUTO_JOIN: booleanish.default(false),
+    /** The role auto-joined users get. Deliberately the least privileged. */
+    GATHER_SSO_DEFAULT_ROLE: z.enum(['member', 'admin']).default('member'),
     GATHER_LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
+    /**
+     * Bearer token for `/api/metrics`. Empty — the default — and the endpoint 404s.
+     *
+     * Required rather than optional because the numbers describe somebody else's practice:
+     * how many clients they have, how many documents they hold. Interesting to an operator,
+     * nobody else's business, and trivially scraped if left open.
+     */
+    GATHER_METRICS_TOKEN: optionalText,
     // Read directly from process.env by the startup hook, which runs before anything
     // else; declared here so it is validated and documented alongside the rest.
     GATHER_AUTO_MIGRATE: booleanish.default(true),
@@ -246,6 +314,73 @@ const envSchema = z
         path: ['SMTP_HOST'],
         message: 'is required when MAIL_DRIVER=smtp.',
       });
+    }
+  })
+  .superRefine((value, ctx) => {
+    const configured = Boolean(value.SSO_ISSUER_URL);
+
+    if (configured) {
+      // A discovery URL that is not a URL fails at the first sign-in attempt, at which
+      // point somebody is locked out of their own install. Fail at boot instead.
+      try {
+        const issuer = new URL(value.SSO_ISSUER_URL!);
+        const insecure = issuer.protocol !== 'https:';
+        const excused = value.SSO_ALLOW_INSECURE_ISSUER || issuer.hostname === 'localhost';
+        if (insecure && !excused) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['SSO_ISSUER_URL'],
+            message:
+              'must be https. An OIDC exchange over plain http hands the authorization ' +
+              'code to anyone on the path. localhost is allowed, and ' +
+              'SSO_ALLOW_INSECURE_ISSUER=true excuses it for development.',
+          });
+        }
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['SSO_ISSUER_URL'],
+          message:
+            'must be the issuer URL, e.g. https://login.example.com/realms/staff — Gather ' +
+            'appends /.well-known/openid-configuration to it.',
+        });
+      }
+
+      for (const key of ['SSO_CLIENT_ID', 'SSO_CLIENT_SECRET'] as const) {
+        if (!value[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message:
+              'is required when SSO_ISSUER_URL is set — register Gather as a client in your provider.',
+          });
+        }
+      }
+    }
+
+    if (value.GATHER_SSO_ENFORCED && !configured) {
+      // The worst possible failure: passwords off, SSO not configured, nobody can sign in.
+      ctx.addIssue({
+        code: 'custom',
+        path: ['GATHER_SSO_ENFORCED'],
+        message:
+          'cannot be true without SSO_ISSUER_URL. Enforcing SSO turns off password ' +
+          'sign-in, so with no provider configured nobody could sign in at all.',
+      });
+    }
+
+    if (value.SSO_ALLOWED_DOMAINS) {
+      const bad = value.SSO_ALLOWED_DOMAINS.split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .filter((entry) => !/^@[^@\s]+\.[^@\s]+$/.test(entry));
+      if (bad.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['SSO_ALLOWED_DOMAINS'],
+          message: `each entry must look like @example.com — got ${bad.join(', ')}`,
+        });
+      }
     }
   })
   .superRefine((value, ctx) => {

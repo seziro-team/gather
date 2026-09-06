@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Card, PageHeader } from '@/components/ui';
-import { listClients } from '@/lib/clients';
+import { pickableClients } from '@/lib/clients';
 import { requireReadyUser } from '@/lib/session';
 import { listTemplates } from '@/lib/templates';
 import { NewRequestForm } from './new-request-form';
@@ -17,7 +17,7 @@ export default async function NewRequestPage({
 }) {
   const { membership } = await requireReadyUser();
   const [clients, templates, query] = await Promise.all([
-    listClients(membership.firm.id),
+    pickableClients(membership.firm.id),
     listTemplates(membership.firm.id),
     searchParams,
   ]);

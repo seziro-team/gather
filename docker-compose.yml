@@ -56,6 +56,20 @@ services:
       CLAMAV_PORT: ${CLAMAV_PORT:-3310}
       CLAMAV_TIMEOUT_MS: ${CLAMAV_TIMEOUT_MS:-120000}
       GATHER_LOG_LEVEL: ${GATHER_LOG_LEVEL:-info}
+      # Prometheus metrics at /api/metrics. Empty and the endpoint does not exist.
+      GATHER_METRICS_TOKEN: ${GATHER_METRICS_TOKEN:-}
+      # Single sign-on. Empty and Gather signs people in with a password, as before.
+      SSO_ISSUER_URL: ${SSO_ISSUER_URL:-}
+      SSO_CLIENT_ID: ${SSO_CLIENT_ID:-}
+      SSO_CLIENT_SECRET: ${SSO_CLIENT_SECRET:-}
+      SSO_PROVIDER_NAME: ${SSO_PROVIDER_NAME:-your organisation}
+      SSO_SCOPES: ${SSO_SCOPES:-openid profile email}
+      SSO_ALLOWED_DOMAINS: ${SSO_ALLOWED_DOMAINS:-}
+      SSO_ALLOW_INSECURE_ISSUER: ${SSO_ALLOW_INSECURE_ISSUER:-false}
+      GATHER_SSO_ENFORCED: ${GATHER_SSO_ENFORCED:-false}
+      GATHER_SSO_SATISFIES_2FA: ${GATHER_SSO_SATISFIES_2FA:-true}
+      GATHER_SSO_AUTO_JOIN: ${GATHER_SSO_AUTO_JOIN:-false}
+      GATHER_SSO_DEFAULT_ROLE: ${GATHER_SSO_DEFAULT_ROLE:-member}
       GATHER_AUTO_MIGRATE: ${GATHER_AUTO_MIGRATE:-true}
       GATHER_DATA_DIR: /app/data
       # Storage. Left as-is this is a directory in the gather-data volume below and

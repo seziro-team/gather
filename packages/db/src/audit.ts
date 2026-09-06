@@ -145,3 +145,22 @@ export async function verifyStoredAuditChain(
     current ? { lastId: current.lastId, lastHash: current.lastHash } : null,
   );
 }
+
+/** The current head of the chain: the newest event's id and hash. */
+export async function readAuditHead(
+  db: Database,
+): Promise<{ lastId: number; lastHash: string; updatedAt: Date } | null> {
+  const rows = await db.select().from(auditHead).where(eq(auditHead.id, 1)).limit(1);
+  const row = rows[0];
+  return row ? { lastId: row.lastId, lastHash: row.lastHash, updatedAt: row.updatedAt } : null;
+}
+
+/** The stored hash of one event, for checking an anchor against the chain it came from. */
+export async function readAuditHash(db: Database, id: number): Promise<string | null> {
+  const rows = await db
+    .select({ hash: auditEvent.hash })
+    .from(auditEvent)
+    .where(eq(auditEvent.id, id))
+    .limit(1);
+  return rows[0]?.hash ?? null;
+}

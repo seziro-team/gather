@@ -10,6 +10,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for every job in this file. CI reads the repository and writes nothing;
+# a workflow with the default token can push commits and open pull requests, which is a
+# large amount of authority to hand to `pnpm install` running third-party postinstall
+# scripts. Any job needing more asks for it explicitly.
+permissions:
+  contents: read
+
 env:
   NODE_VERSION: '22.20.0'
 
@@ -36,7 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - uses: actions/setup-node@v7
         with:
@@ -86,7 +93,7 @@ jobs:
       - name: Install oathtool and unzip
         run: sudo apt-get update && sudo apt-get install -y oathtool unzip
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - uses: actions/setup-node@v7
         with:
@@ -171,7 +178,7 @@ jobs:
       - name: Install oathtool
         run: sudo apt-get update && sudo apt-get install -y oathtool
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - uses: actions/setup-node@v7
         with:
@@ -243,6 +250,50 @@ jobs:
             playwright-report/
           retention-days: 7
 
+  sso:
+    name: Single sign-on
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # A real Keycloak, not a mock: the browser is redirected to it, types a password into
+      # its own login page, and comes back with a code Gather exchanges server-side for a
+      # real signed ID token. Two passes — SSO offered, then SSO enforced — because those
+      # are different products and only the second is what an IT department deploys.
+      - name: Run both SSO suites
+        run: |
+          cp .env.example .env
+          pnpm test:sso
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.mail.yml \
+                         -f docker-compose.test.yml -f docker-compose.sso.yml \
+                         logs --no-color
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts-sso
+          path: |
+            artifacts/
+            playwright-report/
+          retention-days: 7
+
   cloud:
     name: The hosted tier
     runs-on: ubuntu-latest
@@ -253,7 +304,7 @@ jobs:
       - name: Install oathtool
         run: sudo apt-get update && sudo apt-get install -y oathtool
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - uses: actions/setup-node@v7
         with:
@@ -307,7 +358,7 @@ jobs:
       - name: Install oathtool
         run: sudo apt-get update && sudo apt-get install -y oathtool
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - uses: actions/setup-node@v7
         with:

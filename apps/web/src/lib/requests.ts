@@ -1,5 +1,13 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
-import { countItems, instantiateBody, type TemplateBody } from '@gather/core';
+import { and, count, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import {
+  countItems,
+  instantiateBody,
+  likePattern,
+  paginate,
+  type Page,
+  type Paginated,
+  type TemplateBody,
+} from '@gather/core';
 import {
   appendAuditEvent,
   client,
@@ -35,24 +43,52 @@ const itemCountSql = sql<number>`(
   where ${section.requestId} = ${request.id}
 )`;
 
-export async function listRequests(firmId: string): Promise<RequestSummary[]> {
-  return getDb()
-    .select({
-      id: request.id,
-      title: request.title,
-      status: request.status,
-      dueAt: request.dueAt,
-      updatedAt: request.updatedAt,
-      templateKey: request.templateKey,
-      clientId: client.id,
-      clientName: client.name,
-      clientEmail: client.email,
-      itemCount: itemCountSql,
-    })
-    .from(request)
-    .innerJoin(client, eq(client.id, request.clientId))
-    .where(eq(request.firmId, firmId))
-    .orderBy(desc(request.updatedAt));
+export async function listRequests(
+  firmId: string,
+  options: { search?: string | null; page: Page },
+): Promise<Paginated<RequestSummary>> {
+  const db = getDb();
+  const filters: (SQL | undefined)[] = [eq(request.firmId, firmId)];
+
+  if (options.search) {
+    // Title or client — the two things a firm looks a request up by. Escaped, so a request
+    // called "100% of statements" is a title and not a wildcard.
+    const pattern = likePattern(options.search);
+    filters.push(
+      or(ilike(request.title, pattern), ilike(client.name, pattern), ilike(client.email, pattern)),
+    );
+  }
+
+  const where = and(...filters);
+
+  const [rows, totals] = await Promise.all([
+    db
+      .select({
+        id: request.id,
+        title: request.title,
+        status: request.status,
+        dueAt: request.dueAt,
+        updatedAt: request.updatedAt,
+        templateKey: request.templateKey,
+        clientId: client.id,
+        clientName: client.name,
+        clientEmail: client.email,
+        itemCount: itemCountSql,
+      })
+      .from(request)
+      .innerJoin(client, eq(client.id, request.clientId))
+      .where(where)
+      .orderBy(desc(request.updatedAt))
+      .limit(options.page.size)
+      .offset(options.page.offset),
+    db
+      .select({ total: count() })
+      .from(request)
+      .innerJoin(client, eq(client.id, request.clientId))
+      .where(where),
+  ]);
+
+  return paginate(rows, totals[0]?.total ?? 0, options.page);
 }
 
 export async function getRequest(

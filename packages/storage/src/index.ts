@@ -9,9 +9,11 @@ import { openStored, type OpenStoredInput } from './pipeline.js';
 import { S3Storage } from './s3.js';
 
 export {
+  canUnwrap,
   createDecryptor,
   createEncryptor,
   generateMasterKey,
+  rewrapDek,
   parseMasterKey,
   EncryptionKeyError,
   MASTER_KEY_BYTES,

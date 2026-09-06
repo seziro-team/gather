@@ -480,3 +480,37 @@ export function sameSecret(a: string, b: string): boolean {
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 }
+
+/**
+ * The firm to put a new SSO user in, or `null`.
+ *
+ * `null` unless there is **exactly one** firm on this install. That is the whole safety
+ * property: on an install with two firms there is no right answer to "which one", and
+ * guessing would drop somebody into another firm's client list. Reads two rows, not all of
+ * them — the question is "is there exactly one", not "how many".
+ */
+export async function soleFirmId(db: Db): Promise<string | null> {
+  const rows = await db.select({ id: firm.id }).from(firm).limit(2);
+  return rows.length === 1 ? rows[0]!.id : null;
+}
+
+/** Put a user in a firm, idempotently, with the audit row that says how they got there. */
+export async function joinFirm(
+  tx: DbTransaction,
+  input: { firmId: string; userId: string; role: FirmRole; via: string },
+): Promise<void> {
+  await tx
+    .insert(firmUser)
+    .values({ firmId: input.firmId, userId: input.userId, role: input.role })
+    .onConflictDoNothing();
+
+  await appendAuditEvent(tx, {
+    action: 'firm.member_added',
+    actorType: 'system',
+    actorId: input.userId,
+    firmId: input.firmId,
+    targetType: 'user',
+    targetId: input.userId,
+    metadata: { role: input.role, via: input.via },
+  });
+}

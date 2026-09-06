@@ -1,4 +1,5 @@
-import { PLAN_DEFINITIONS } from '@gather/core';
+import { PLAN_DEFINITIONS, parsePage } from '@gather/core';
+import { Pager } from '@/components/pager';
 import { Badge, Card } from '@/components/ui';
 import { readAdminOverview } from '@/lib/admin';
 import { applicablePlan } from '@/lib/cloud';
@@ -26,8 +27,13 @@ function ago(date: Date | null): string {
   return date.toISOString().slice(0, 10);
 }
 
-export default async function AdminPage() {
-  const { firms, totals } = await readAdminOverview();
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const page = parsePage((await searchParams).page, 50);
+  const { firms, totals } = await readAdminOverview(page);
 
   const stats = [
     { label: 'Firms', value: totals.firms.toLocaleString() },
@@ -89,7 +95,7 @@ export default async function AdminPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {firms.map((firm) => (
+            {firms.rows.map((firm) => (
               <tr key={firm.id}>
                 <td className="px-4 py-3">
                   <p className="font-medium text-slate-900">{firm.name}</p>
@@ -120,7 +126,7 @@ export default async function AdminPage() {
                 <td className="px-4 py-3 text-slate-700">{ago(firm.lastActivityAt)}</td>
               </tr>
             ))}
-            {firms.length === 0 ? (
+            {firms.total === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                   No firms yet.
@@ -129,6 +135,9 @@ export default async function AdminPage() {
             ) : null}
           </tbody>
         </table>
+        <div className="px-4 pb-4">
+          <Pager page={firms} basePath="/admin" unit="firm" />
+        </div>
       </Card>
     </div>
   );

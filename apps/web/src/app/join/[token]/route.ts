@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { env } from '@gather/core';
+import { passwordsEnabled, ssoEnabled } from '@/lib/auth';
 import { getSessionUser } from '@/lib/session';
 import { requestContext } from '@/lib/request-context';
 import { join, lookupInvite } from '@/lib/team';
@@ -45,6 +46,16 @@ export async function GET(
     // cookie so that finishing in a different tab still works.
     // Sign up (or sign in) carrying the invitation, so somebody who has never heard of
     // Gather can follow one link end to end.
+    // Where a signed-out invitee goes depends on how this install lets people in.
+    //
+    // With SSO enforced there is no password to set, so a sign-up form would be a dead
+    // end: they authenticate with the provider first and come back here, where the
+    // invitation is accepted for the account they now have.
+    if (!passwordsEnabled() && ssoEnabled()) {
+      const next = encodeURIComponent(`/join/${token}`);
+      return NextResponse.redirect(new URL(`/sign-in?next=${next}`, appUrl));
+    }
+
     return NextResponse.redirect(new URL(`/sign-up?invite=${encodeURIComponent(token)}`, appUrl));
   }
 

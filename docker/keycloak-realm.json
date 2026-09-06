@@ -1,0 +1,70 @@
+{
+  "realm": "gather",
+  "displayName": "Gather development fixture \u2014 never expose this realm",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "accessTokenLifespan": 300,
+  "clients": [
+    {
+      "clientId": "gather",
+      "name": "Gather",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "secret": "gather-dev-client-secret",
+      "redirectUris": [
+        "http://localhost:3000/api/auth/callback/sso",
+        "http://127.0.0.1:3000/api/auth/callback/sso"
+      ],
+      "webOrigins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "defaultClientScopes": ["openid", "profile", "email", "roles", "web-origins"]
+    }
+  ],
+  "users": [
+    {
+      "username": "dana",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "dana@delgado.example.com",
+      "firstName": "Dana",
+      "lastName": "Delgado",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "correct horse battery staple",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "sam",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "sam@outside.example.org",
+      "firstName": "Sam",
+      "lastName": "Outside",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "correct horse battery staple",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

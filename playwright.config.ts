@@ -51,13 +51,52 @@ export default defineConfig({
       // 1280px window has no horizontal overflow, which is not the claim being made.
       // The portal suite is a mobile test; the antivirus suite needs the opt-in ClamAV
       // profile and is run by its own script against its own stack.
-      testIgnore: [/portal-mobile\.spec\.ts/, /antivirus\.spec\.ts/, /cloud\.spec\.ts/],
+      testIgnore: [
+        /portal-mobile\.spec\.ts/,
+        /antivirus\.spec\.ts/,
+        /cloud\.spec\.ts/,
+        /sso\.spec\.ts/,
+        /sso-enforced\.spec\.ts/,
+      ],
     },
     /*
      * The hosted tier is opt-in for the same reason: it needs its own stack, with
      * GATHER_CLOUD on. Against a self-hosted install these pages are 404s, and
      * team.spec.ts ④ is the test that asserts that.
      */
+    /*
+     * Single sign-on, against a real Keycloak. Opt-in for the same reason as the others:
+     * it needs its own stack, and on a default install there is no provider to sign in to.
+     *
+     * `--host-resolver-rules` is the crux. An OIDC redirect goes through the browser while
+     * the token exchange happens server-side, and the `iss` in the token is compared
+     * against one configured issuer — so both sides have to reach the provider at the same
+     * name. `keycloak` resolves inside the compose network; this makes it resolve for the
+     * browser too, rather than weakening the check to make a test pass.
+     */
+    ...(process.env.GATHER_TEST_SSO === '1'
+      ? [
+          {
+            name: 'sso',
+            use: {
+              ...devices['Desktop Chrome'],
+              launchOptions: {
+                args: [
+                  `--host-resolver-rules=MAP keycloak 127.0.0.1:${process.env.KEYCLOAK_PORT ?? '8081'}`,
+                ],
+              },
+            },
+            // The two passes are separate projects because they need differently
+            // configured stacks — "SSO available" and "SSO enforced" are different
+            // products, and testing only the first proves nothing about the second.
+            testMatch:
+              process.env.GATHER_TEST_SSO_ENFORCED === '1'
+                ? /sso-enforced\.spec\.ts/
+                : /sso\.spec\.ts/,
+            timeout: 120_000,
+          },
+        ]
+      : []),
     ...(process.env.GATHER_TEST_CLOUD === '1'
       ? [
           {

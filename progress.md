@@ -1579,3 +1579,249 @@ Entry template:
      completed a call**.
 
 - **Next step (exact resume instruction):** `Run docs/stripe-verification.md end to end with real Stripe test keys, then update progress.md and the ⚠️ notes it names.`
+
+---
+
+## 2026-09-06 — Enterprise readiness (post-v0.1.0)
+
+Not a planned phase. The operator asked for the repository to be checked as published and
+for whatever was left to be finished to an enterprise standard, and the answer to the first
+question turned out to be the most important thing in this entry.
+
+- **Shipped:**
+  - **The repository was private.** A product whose README, site and licence all say "built
+    in the open" was visible to nobody. Now public, with branch protection requiring all six
+    CI jobs before a merge, Dependabot alerts, secret scanning with push protection, and
+    private vulnerability reporting. The full 40-commit history was audited for secrets
+    first: no `.env`, no keys, no certificates — every secret-shaped string is a placeholder
+    or an `openssl rand` command.
+  - **Single sign-on (OIDC).** Against any provider with a discovery document — Okta, Entra
+    ID, Google Workspace, Keycloak, Authentik. `GATHER_SSO_ENFORCED=true` turns off Gather
+    passwords entirely; `SSO_ALLOWED_DOMAINS` limits which identities are admitted;
+    `GATHER_SSO_AUTO_JOIN` provisions into the firm when the install has exactly one.
+    **In the free product**, like team roles.
+  - **Pagination and search** on clients, requests, the dashboard and the operator console.
+  - **`pnpm keys:rotate`** and **`pnpm audit:anchor`** — the two gaps `SECURITY.md` has been
+    honest about since Phase 6.
+  - **Liveness split from readiness** (`/api/live` vs `/api/health`), and Prometheus metrics
+    at `/api/metrics` behind a bearer token, absent unless one is set.
+  - **CodeQL** weekly and on every pull request; a **release workflow** producing a
+    CycloneDX SBOM and a container image with a signed provenance attestation.
+  - `CODE_OF_CONDUCT.md`; `docs/sso.md`; a rewritten `SECURITY.md`.
+  - Dependencies brought current within their majors, including Better Auth 1.6 → 1.7.
+
+- **Real-world proof (what actually ran):**
+
+  **SSO, against a real Keycloak — eight tests over two configurations.** No mock: the
+  browser is redirected to Keycloak, types a password into Keycloak's own login page, and
+  returns with a code Gather exchanges server-side for a real signed ID token.
+
+  ```
+  $ pnpm test:sso
+  ▸ pass 1 — SSO offered alongside passwords
+    ✓ ① the discovery document is real, and Gather reads it rather than hard-coding endpoints
+    ✓ ② a first-ever sign-in creates the account the provider asserted
+    ✓ ③ signing in again returns to the same account, not a second one
+    ✓ ④ every sign-in is in the audit trail
+    4 passed (19.5s)
+  ▸ pass 2 — SSO enforced, one allowed domain, auto-join on
+    ✓ ⑤ there is no password to sign in with, anywhere
+    ✓ ⑥ an identity outside the allowed domain is refused, in words it can act on
+    ✓ ⑦ an allowed identity gets in, and is not asked for a second factor
+    ✓ ⑧ with more than one firm on the install, nobody is auto-joined to either
+    4 passed (14.2s)
+  ```
+
+  **Key rotation, on 167 real encrypted files.** The design pays off here: each file has its
+  own key and only *that* key is wrapped with the master key, so rotating re-wraps sixty
+  bytes per file and reads no object at all.
+
+  ```
+  $ pnpm keys:rotate                     # dry run
+  Would rotate: 167 · Already on the new key: 0 · Could not be rotated: 0
+
+  $ pnpm keys:rotate --confirm
+  Rotated: 167 · Could not be rotated: 0
+  real  0m1.738s
+
+  $ pnpm keys:rotate --confirm           # again, to prove it is resumable
+  Rotated: 0 · Already on the new key: 167
+  ```
+
+  Then the proof that matters — twelve files uploaded **the day before** the rotation, read
+  back through the storage layer with **only the new key**, each checked against the SHA-256
+  recorded when the client uploaded it:
+
+  ```
+  ✓ irs-form-w9.pdf (140815 bytes, uploaded 2026-09-05T08:29:07) sha256 matches
+  ✓ receipt-photo.jpg (243549 bytes, uploaded 2026-09-05T09:43:42) sha256 matches
+  … 12 verified, 0 failed
+
+  # and the same twelve, with the OLD key:
+  ✗ … could not be decrypted with the configured GATHER_ENCRYPTION_KEY
+  0 verified, 12 failed
+  ```
+
+  **Audit anchoring, against a real tampering.** Anchor written, history rewritten the way
+  somebody with database access would, anchor checked again:
+
+  ```
+  $ pnpm audit:anchor --write
+  Anchored event 3465 → 02f55ab31c31c107eca3c322a82ee658d16928dc470b63a0e47142a2effc5043
+
+  $ psql -c "alter table audit_event disable trigger audit_event_append_only;
+             update audit_event set hash = repeat('be',32) where id = 3465;"
+
+  $ pnpm audit:anchor --verify ; echo $?
+  FAIL — 1 of 1 anchors no longer hold:
+    ✗ event 3465 (anchored 2026-09-06T07:11:32.315Z) now hashes to bebebe…, but was
+      02f55ab3… when it was anchored — history has been rewritten
+  1
+  ```
+
+  **Metrics, really scraped** (401 without the token, 404 with none configured):
+
+  ```
+  $ curl -H 'Authorization: Bearer …' localhost:3000/api/metrics
+  gather_firms 293
+  gather_requests_awaiting_review 11
+  gather_storage_bytes 21036249
+  gather_files_infected 3          ← the EICAR samples from the antivirus suite
+  gather_audit_last_id 3539
+  ```
+
+- **Decisions & why:**
+  1. **SSO is free.** It was tempting to make it the flagship paid feature — it is what an
+     enterprise buyer asks for first. Charging a firm extra to turn on the security control
+     you want them to use is a practice this project will not adopt, and putting it behind a
+     plan would have broken the boundary rule in plan.md §7.2 the same way gating team roles
+     would have.
+  2. **Enforced SSO waives Gather's TOTP requirement** (`GATHER_SSO_SATISFIES_2FA`, default
+     on). When the provider is the only way in and it is doing MFA, a second TOTP is not
+     more security — it is a second secret in the same password manager. A password account
+     on an install that merely *offers* SSO is unaffected, because a password is still a way
+     in.
+  3. **Auto-join only when there is exactly one firm.** Not "the first firm", not "the
+     firm with the most members" — exactly one, or nothing. On an install with two there is
+     no right answer, and guessing puts a stranger in somebody's client list.
+  4. **Offset paging, not keyset.** A firm wants "the overdue ones, page 3", and keyset
+     cannot jump to page 3 or say there are eleven pages. What it replaces is worse than
+     either: no limit at all.
+  5. **Metrics are off unless a token is set, and 404 rather than 401 when off.** The
+     numbers describe somebody else's practice — how many clients, how many documents. An
+     install that does not export them should not advertise that it could.
+  6. **Rotation does not switch you over.** It re-wraps the keys and then tells you to put
+     the new key in your secret store yourself. It cannot edit that store, and pretending
+     otherwise is the one failure mode that loses documents.
+
+  **Defects found while doing this:**
+
+  1. **`SECURITY.md` was telling people not to use the product.** It still said encryption at
+     rest, virus scanning, retention and security headers "are Phases 3 and 6 — until then,
+     do not put real client documents into a Gather install". All of that shipped weeks ago.
+     On a repository that had just been made public, that was the first thing a careful
+     reader would have found.
+  2. **The `no-console` lint exemption covered `packages/*/src/cli/**` but not
+     `apps/*/src/cli/**`,** so the CLIs in `apps/worker` were exempt only by accident of
+     never having been linted with a console call in them.
+  3. **`e2e/scale.spec.ts` looked up its firm with `order by fu.id desc`** — and `firm_user.id`
+     is a uuid, so that is ordering by nothing. It seeded one firm and asserted against
+     another. Fixed by matching the exact address `signUpOwner` returns.
+  4. **Better Auth 1.7 changed two APIs** under a minor bump: `enableTwoFactor` now returns a
+     union, and `genericOAuth` replaced the caller-supplied `issuer` with
+     `requireIdTokenVerification`, which makes discovery supply the issuer and JWKS. The
+     second is stricter than what it replaced, so Gather now uses it.
+  5. **The Playwright bump needed new browser binaries**, which failed 37 tests in 6ms each
+     with a message that says exactly that. Worth recording only because "everything failed
+     instantly" reads like a catastrophe and was a download.
+
+  **CodeQL paid for itself on its first run**, and CI caught two things no local run could.
+
+  Eight alerts on the pull request that introduced it — one high, seven medium — and every
+  one was real:
+
+  - **`js/polynomial-redos` (high)** in `packages/core/src/sso.ts`. Trimming trailing
+    slashes with `replace(/\/+$/, '')` backtracks polynomially: an input of many slashes
+    makes the engine retry every split point. Only reachable from an operator's own
+    configuration, so the practical risk was small — but it is a real defect, and a loop is
+    both faster and impossible to get wrong. Now covered by a test that trims 100,000
+    slashes in under a second.
+  - **`actions/unpinned-tag` (medium × 6)** — third-party actions referenced by moving tag.
+    A tag can be repointed at any commit by whoever owns the repository, so a supply-chain
+    compromise upstream becomes one here silently. Pinned to commit SHAs, with the tag kept
+    in a comment.
+  - **`actions/missing-workflow-permissions` (medium)** — `ci.yml` had no `permissions:`
+    block, so every job ran with a token that can push commits and open pull requests, while
+    running `pnpm install` and third-party postinstall scripts. Now `contents: read` at the
+    top of the file, and jobs ask for more only if they need it.
+
+  And the SSO job failed in CI while passing locally, for a reason worth keeping:
+
+  ```
+  Expected substring: "Keycloak"
+  Received string:    "Sign in with your organisation"
+  ```
+
+  CI does `cp .env.example .env`, and this pass had just added `SSO_PROVIDER_NAME=your
+  organisation` to that file. Compose substitutes `${SSO_PROVIDER_NAME:-Keycloak}` from
+  `.env`, so the overlay's default never applied. It passed here only because this machine's
+  `.env` predates the setting. Confirmed by `docker compose config` rather than guessed, and
+  fixed where it belongs: the fixture now names itself in `scripts/sso-e2e.sh`, where a
+  shell variable beats `.env`.
+
+  A third, found while re-reading rather than by any tool: `attachToSoleFirm` carried a
+  comment saying it was silent on failure, and let the exception escape into Better Auth's
+  user-create hook — where it would have failed the sign-in of somebody the provider had
+  already authenticated. The comment was right about what it should do; the code was not.
+
+  And a fourth, which the provider-name fix uncovered underneath itself: **Better Auth 1.7
+  moved generic-OAuth sign-in onto the social path**, under a minor version bump and with no
+  type error. `/api/auth/sign-in/oauth2` became `/api/auth/sign-in/social` with
+  `{ provider }` rather than `{ providerId }`, and the redirect URI moved from
+  `/api/auth/oauth2/callback/sso` to `/api/auth/callback/sso`. The plugin registers no
+  endpoints of its own any more, so the old URL is simply a 404 and the button did nothing.
+
+  Nothing static caught it — the config still typechecks, and the app still boots and draws
+  the button. It took reproducing the plugin's `init` in isolation and listing what the
+  instance actually exposes:
+
+  ```
+  all api keys: … signInEmail, signInSocial, signOut, signUpEmail …
+  # no signInWithOAuth2, no oAuth2Callback — the plugin contributes none
+  signInSocial({provider:"sso"}) → {"url":"http://keycloak:8081/realms/gather/protocol/…"}
+  ```
+
+  Worth recording as the argument for the Keycloak suite existing at all: a dependency
+  upgrade silently removed the endpoint the entire feature is built on, and the only thing
+  that could have noticed is a test that drives a real provider end to end.
+
+  Fixing that then exposed a fifth, in the fixture rather than the product: Keycloak imports
+  a realm **only into a fresh container**. `start-dev` keeps its H2 database inside the
+  container, and compose does not recreate a service because a mounted file's contents
+  changed — so the redirect URI in `keycloak-realm.json` was updated on disk and ignored, and
+  Keycloak answered `Invalid parameter: redirect_uri` against a realm that looked correct
+  when you read it. `scripts/sso-e2e.sh` now replaces the container each run, which costs
+  twenty seconds and removes a whole category of "but I changed that".
+
+- **Deviations from plan:** none — this is work beyond plan.md §9, which ended at Phase 8.
+  `plan.md` §7.1 is updated to list SSO in the free tier.
+
+- **Known issues:**
+  1. ⛔ **Stripe is still unproven.** Unchanged: no account, no completed call.
+     `docs/stripe-verification.md`.
+  2. **No SAML and no SCIM.** OIDC only, and users are created on first sign-in rather than
+     pushed from a directory — so deactivating somebody in the provider stops them signing
+     in but does not remove their membership row. Stated plainly in `docs/sso.md`.
+  3. **No group-to-role mapping.** Everybody arrives as `GATHER_SSO_DEFAULT_ROLE`.
+  4. **Rotation is not scheduled.** `pnpm keys:rotate` is a command an operator runs; there
+     is no timer and no reminder.
+  5. **The anchor file is only as good as where it is kept.** Gather cannot check that you
+     put it somewhere the database cannot reach, and says so rather than implying otherwise.
+  6. **Metrics have no per-request histograms** — only aggregates over state.
+  7. **Dependabot majors are still open and deliberately unmerged:** TypeScript 7, vitest 5,
+     `@types/node` 26, and the `node:22-alpine` → `node:25-alpine` image bump. Node 25 is not
+     an LTS line and does not belong in a product image.
+  8. Carried over from Phase 7/8: one firm per person; storage limits are a pre-check;
+     the production stack has never run on a real hostname; backups are local.
+
+- **Next step (exact resume instruction):** `Run docs/stripe-verification.md end to end with real Stripe test keys, then update progress.md and the ⚠️ notes it names.`

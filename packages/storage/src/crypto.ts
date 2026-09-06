@@ -169,3 +169,46 @@ export function createDecryptor(
   decipher.setAuthTag(tag);
   return decipher;
 }
+
+/**
+ * Move a file's key material from one master key to another.
+ *
+ * The reason rotation is cheap here: the file's bytes are encrypted under a per-file DEK,
+ * and only that DEK is wrapped with the master key. Rotating means unwrapping 60 bytes and
+ * wrapping them again — no object is read, no ciphertext is rewritten, and a firm with a
+ * terabyte of documents rotates in the time it takes to update a column.
+ *
+ * The AAD binds the wrapped DEK to its object, so this cannot be used to move key material
+ * between files: unwrap with the wrong storage key and it fails to authenticate.
+ */
+export function rewrapDek(
+  oldMasterKey: Buffer,
+  newMasterKey: Buffer,
+  storageKey: string,
+  dekWrapped: string,
+): string {
+  const dek = unwrapDek(oldMasterKey, dekWrapped, storageKey);
+  try {
+    return wrapDek(newMasterKey, dek, storageKey);
+  } finally {
+    // The DEK existed in this process for as long as it took to re-wrap it. Zeroing is not
+    // a guarantee — V8 may have copied it — but leaving it is a choice, and this is not.
+    dek.fill(0);
+  }
+}
+
+/**
+ * Whether this master key can open this file's key material.
+ *
+ * What makes rotation resumable and safe to re-run: a file already rotated unwraps under
+ * the new key, so the CLI skips it rather than trying to unwrap it with the old one and
+ * failing. An interrupted rotation is therefore just a rotation that has not finished.
+ */
+export function canUnwrap(masterKey: Buffer, storageKey: string, dekWrapped: string): boolean {
+  try {
+    unwrapDek(masterKey, dekWrapped, storageKey).fill(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
