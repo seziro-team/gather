@@ -149,8 +149,8 @@ importers:
         specifier: workspace:*
         version: link:../core
       stripe:
-        specifier: ^22.6.1
-        version: 22.6.1(@types/node@26.4.1)
+        specifier: ^22.6.2
+        version: 22.6.2(@types/node@26.4.1)
 
   packages/core:
     dependencies:
@@ -2961,8 +2961,8 @@ packages:
     resolution: {integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==}
     engines: {node: '>=8'}
 
-  stripe@22.6.1:
-    resolution: {integrity: sha512-hAKSkGeVt2u46TRYhmnvwmVHxBNtOCJnPjc+SH5sP2B2ypElYzAAY3Ljx0Ar8C2w8nfpFQiZ95qoDCDsFkXMTA==}
+  stripe@22.6.2:
+    resolution: {integrity: sha512-PwRE2scocvXqDKPiskMa5vRJEAEkq46W69XyUYmAwrNSLr675lQnfqLwnsndAWizwgihOWw/irLmoFRo3ez7ew==}
     engines: {node: '>=18'}
     peerDependencies:
       '@types/node': '>=18'
@@ -5959,7 +5959,7 @@ snapshots:
     dependencies:
       ansi-regex: 5.0.1
 
-  stripe@22.6.1(@types/node@26.4.1):
+  stripe@22.6.2(@types/node@26.4.1):
     optionalDependencies:
       '@types/node': 26.4.1
 
