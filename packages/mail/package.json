@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@gather/core": "workspace:*",
-    "nodemailer": "^10.0.0"
+    "nodemailer": "^10.0.3"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1"
