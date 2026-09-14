@@ -20,6 +20,6 @@
     "@gather/mail": "workspace:*",
     "@gather/reminders": "workspace:*",
     "@gather/storage": "workspace:*",
-    "pg-boss": "^12.30.0"
+    "pg-boss": "^12.31.0"
   }
 }
