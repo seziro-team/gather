@@ -11,7 +11,7 @@
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@better-auth/drizzle-adapter": "^1.7.3",
+    "@better-auth/drizzle-adapter": "^1.7.7",
     "@gather/billing": "workspace:*",
     "@gather/core": "workspace:*",
     "@gather/db": "workspace:*",
